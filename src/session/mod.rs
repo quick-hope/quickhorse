@@ -1,0 +1,1 @@
+//! Session module - session management (placeholder)

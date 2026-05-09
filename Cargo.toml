@@ -1,0 +1,43 @@
+[package]
+name = "quickhorse"
+version = "0.1.0"
+edition = "2021"
+description = "A CLI coding agent written in Rust"
+license = "MIT"
+
+[dependencies]
+# CLI UI
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+schemars = "0.8"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+itertools = "0.12"
+
+# CLI arguments
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# File globbing
+glob = "0.3"
