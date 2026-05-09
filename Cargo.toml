@@ -44,3 +44,6 @@ glob = "0.3"
 
 # Regex for content search
 regex = "1.10"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
