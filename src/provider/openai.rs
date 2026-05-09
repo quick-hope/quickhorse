@@ -6,8 +6,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
-/// OpenAI API configuration
-const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
+/// Default OpenAI API URL
+const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 
 /// OpenAI provider
 pub struct OpenAIProvider {
@@ -17,15 +17,23 @@ pub struct OpenAIProvider {
     api_key: String,
     /// Model to use
     model: String,
+    /// Base URL for API (custom endpoints like BaiLian, etc.)
+    base_url: String,
 }
 
 impl OpenAIProvider {
-    /// Create a new OpenAI provider
+    /// Create a new OpenAI provider with default API URL
     pub fn new(api_key: String, model: String) -> Self {
+        Self::new_with_base_url(api_key, model, DEFAULT_OPENAI_API_URL.to_string())
+    }
+
+    /// Create a new OpenAI provider with custom base URL
+    pub fn new_with_base_url(api_key: String, model: String, base_url: String) -> Self {
         Self {
             client: Client::new(),
             api_key,
             model,
+            base_url,
         }
     }
 
@@ -165,7 +173,7 @@ impl Provider for OpenAIProvider {
 
         let response = self
             .client
-            .post(OPENAI_API_URL)
+            .post(&self.base_url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -225,7 +233,7 @@ impl Provider for OpenAIProvider {
 
         let response = self
             .client
-            .post(OPENAI_API_URL)
+            .post(&self.base_url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request)

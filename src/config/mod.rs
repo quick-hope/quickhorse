@@ -64,6 +64,10 @@ pub struct OpenAIConfig {
     /// Default model
     #[serde(default = "default_openai_model")]
     pub model: String,
+    /// Custom base URL (or use OPENAI_BASE_URL env var)
+    /// Useful for alternative OpenAI-compatible APIs like BaiLian, DeepSeek, etc.
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 fn default_openai_model() -> String {
@@ -75,6 +79,7 @@ impl Default for OpenAIConfig {
         Self {
             api_key: None,
             model: default_openai_model(),
+            base_url: None,
         }
     }
 }
@@ -235,6 +240,13 @@ impl Config {
             "ollama" => self.providers.ollama.model.clone(),
             _ => "gpt-4".to_string(),
         }
+    }
+
+    /// Get base URL for OpenAI provider (from config or env)
+    pub fn get_base_url(&self) -> Option<String> {
+        self.providers.openai.base_url.clone().or_else(|| {
+            env::var("OPENAI_BASE_URL").ok()
+        })
     }
 }
 

@@ -38,6 +38,10 @@ struct Args {
     #[arg(short, long)]
     api_key: Option<String>,
 
+    /// Custom base URL for API (for BaiLian, DeepSeek, etc.)
+    #[arg(long)]
+    base_url: Option<String>,
+
     /// Run in non-interactive mode (just print version)
     #[arg(short = 'V', long)]
     version: bool,
@@ -76,10 +80,16 @@ async fn main() -> anyhow::Result<()> {
     let provider_name = args.provider;
     let model = args.model.unwrap_or_else(|| config.get_model(&provider_name));
     let api_key = args.api_key.or_else(|| config.get_api_key(&provider_name));
+    let base_url = args.base_url.or_else(|| config.get_base_url());
 
     // Initialize provider
     let provider: Arc<dyn Provider> = match api_key {
-        Some(key) => Arc::new(OpenAIProvider::new(key, model.clone())),
+        Some(key) => {
+            match base_url {
+                Some(url) => Arc::new(OpenAIProvider::new_with_base_url(key, model.clone(), url)),
+                None => Arc::new(OpenAIProvider::new(key, model.clone())),
+            }
+        }
         None => {
             eprintln!("Error: No API key provided. Set OPENAI_API_KEY environment variable or use --api-key");
             std::process::exit(1);
