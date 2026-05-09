@@ -176,6 +176,7 @@ impl Provider for OpenAIProvider {
             .post(&self.base_url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
+            .header("User-Agent", "quickhorse/0.1.0")
             .json(&request)
             .send()
             .await?;
