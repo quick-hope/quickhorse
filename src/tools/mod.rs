@@ -1,10 +1,16 @@
 //! Tools module - tool implementations for the coding agent
 
 mod bash;
+mod file_edit;
+mod file_read;
+mod glob;
 mod tool_trait;
 
 pub use bash::BashTool;
-pub use tool_trait::{Tool, ToolContext, ToolResult};
+pub use file_edit::FileEditTool;
+pub use file_read::FileReadTool;
+pub use glob::GlobTool;
+pub use tool_trait::{Tool, ToolContext, ToolResult, PermissionResult};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,6 +32,9 @@ impl ToolRegistry {
     pub fn with_default_tools() -> Self {
         let mut registry = Self::new();
         registry.register(Arc::new(BashTool::new()));
+        registry.register(Arc::new(FileReadTool::new()));
+        registry.register(Arc::new(FileEditTool::new()));
+        registry.register(Arc::new(GlobTool::new()));
         registry
     }
 
