@@ -4,12 +4,16 @@ mod bash;
 mod file_edit;
 mod file_read;
 mod glob;
+mod grep;
 mod tool_trait;
+mod web_fetch;
 
 pub use bash::BashTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use glob::GlobTool;
+pub use grep::GrepTool;
+pub use web_fetch::WebFetchTool;
 pub use tool_trait::{Tool, ToolContext, ToolResult, PermissionResult};
 
 use std::collections::HashMap;
@@ -35,6 +39,8 @@ impl ToolRegistry {
         registry.register(Arc::new(FileReadTool::new()));
         registry.register(Arc::new(FileEditTool::new()));
         registry.register(Arc::new(GlobTool::new()));
+        registry.register(Arc::new(GrepTool::new()));
+        registry.register(Arc::new(WebFetchTool::new()));
         registry
     }
 

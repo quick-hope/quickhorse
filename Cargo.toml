@@ -41,3 +41,6 @@ tracing-subscriber = "0.3"
 
 # File globbing
 glob = "0.3"
+
+# Regex for content search
+regex = "1.10"
