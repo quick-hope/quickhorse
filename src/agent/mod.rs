@@ -66,7 +66,14 @@ impl Agent {
         self.messages.clear();
     }
 
-    /// Process a user message and return the final response
+    /// Process the last user message (assumes message already in history)
+    pub async fn process_last_user_message(&mut self) -> Result<String, Box<dyn Error + Send + Sync>> {
+        // Run tool call loop - don't add user message again
+        self.run_loop().await
+    }
+
+    /// Process a new user message (adds message to history)
+    #[allow(dead_code)]
     pub async fn process(&mut self, user_input: String) -> Result<String, Box<dyn Error + Send + Sync>> {
         // Add user message
         self.messages.push(Message::user(user_input));

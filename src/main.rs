@@ -256,27 +256,21 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
                         };
 
                         if needs_response {
-                            // Get the last user message text
-                            let user_text = if let Some(idx) = last_user_idx {
-                                app.messages[idx].text_content()
-                            } else {
-                                String::new()
-                            };
-
-                            // Sync agent messages with app messages
+                            // Sync agent messages with app messages (user message already added)
                             agent.clear();
                             for msg in &app.messages {
                                 agent.add_message(msg.clone());
                             }
 
                             // Process with agent (includes tool loop) using runtime
+                            // Don't add user message again - use process_last_user_message
                             let response = rt.block_on(async {
-                                agent.process(user_text).await
+                                agent.process_last_user_message().await
                             });
 
                             match response {
                                 Ok(_content) => {
-                                    // Add the conversation history from agent
+                                    // Sync conversation history from agent back to app
                                     app.messages = agent.messages().to_vec();
                                     app.is_loading = false;
                                 }
