@@ -4,13 +4,13 @@ mod anthropic;
 mod gemini;
 mod ollama;
 mod openai;
-mod stream;
+pub mod stream;
 
 pub use anthropic::AnthropicProvider;
 pub use gemini::GeminiProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
-pub use stream::{StreamEvent, StreamReceiver, StreamSender, create_stream_channel};
+pub use stream::{StreamEvent, StreamReceiver, StreamSender, create_stream_channel, sse};
 
 use async_trait::async_trait;
 use itertools::Itertools;
