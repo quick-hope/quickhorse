@@ -417,6 +417,8 @@ impl App {
             let user_message = Message::user(text);
             self.messages.push(user_message);
             self.is_loading = true;
+            // Start progress spinner
+            self.progress_manager.start_main(Some("Sending message".to_string()));
         }
         self.editor.clear();
     }
@@ -451,6 +453,9 @@ impl App {
         self.messages.push(message);
         self.is_loading = false;
         self.is_streaming = false;
+        // Stop progress spinner
+        self.progress_manager.stop_main();
+        self.progress_manager.clear_completed();
     }
 
     /// Set the status message
@@ -465,6 +470,8 @@ impl App {
         self.is_streaming = true;
         self.is_loading = true;
         self.streaming_text = String::new();
+        // Start progress spinner for streaming
+        self.progress_manager.start_main(Some("Streaming response".to_string()));
 
         // Add placeholder assistant message for streaming updates
         self.messages.push(Message::assistant(String::new()));

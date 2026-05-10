@@ -276,6 +276,9 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
                     // Mouse events not handled
                 }
                 Event::Tick => {
+                    // Update progress animations
+                    app.progress_manager.tick();
+
                     // Handle streaming events on tick
                     if app.is_streaming {
                         app.handle_stream_event();
