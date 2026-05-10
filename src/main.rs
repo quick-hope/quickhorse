@@ -10,6 +10,7 @@
 mod agent;
 mod commands;
 mod config;
+mod error;
 mod log;
 mod mcp;
 mod provider;

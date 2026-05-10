@@ -1,6 +1,7 @@
 //! OpenAI provider implementation
 
 use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel, stream::sse};
+use crate::error::{ErrorCode, QuickHorseError, classify_provider_error, classify_reqwest_error};
 use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
@@ -198,11 +199,17 @@ impl Provider for OpenAIProvider {
             .header("User-Agent", "quickhorse/0.1.0")
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                let err = classify_reqwest_error(&e);
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, err.to_user_message_full())) as Box<dyn Error + Send + Sync>
+            })?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("OpenAI API error: {}", error_text).into());
+            let status = response.status().as_u16();
+            let error_text = response.text().await.unwrap_or_default();
+            let err = classify_provider_error("openai", status, &error_text);
+            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, err.to_user_message_full())) as Box<dyn Error + Send + Sync>);
         }
 
         let chat_response: ChatResponse = response.json().await?;
@@ -330,8 +337,11 @@ impl OpenAIProvider {
         match response {
             Ok(resp) => {
                 if !resp.status().is_success() {
-                    let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    tx.send(StreamEvent::Error(format!("API error: {}", error_text))).await.ok();
+                    let status = resp.status().as_u16();
+                    let error_text = resp.text().await.unwrap_or_default();
+                    let err = classify_provider_error("openai", status, &error_text);
+                    // Send user-friendly error message
+                    tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
                     return;
                 }
 
@@ -416,7 +426,11 @@ impl OpenAIProvider {
                             }
                         }
                         Err(e) => {
-                            tx.send(StreamEvent::Error(format!("Stream error: {}", e))).await.ok();
+                            // Network/stream error
+                            let err = QuickHorseError::new(ErrorCode::STREAMING_ERROR)
+                                .with_details(e.to_string())
+                                .with_retryable(true);
+                            tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
                             return;
                         }
                     }
@@ -434,7 +448,9 @@ impl OpenAIProvider {
                 tx.send(StreamEvent::Done).await.ok();
             }
             Err(e) => {
-                tx.send(StreamEvent::Error(format!("Request failed: {}", e))).await.ok();
+                // Use error classification
+                let err = classify_reqwest_error(&e);
+                tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
             }
         }
     }

@@ -167,6 +167,11 @@ impl SessionManager {
         Self::new(PathBuf::from(".quickhorse/sessions"))
     }
 
+    /// Get the sessions directory path
+    pub fn sessions_dir(&self) -> &PathBuf {
+        &self.sessions_dir
+    }
+
     /// Save a session to file
     pub async fn save(&self, session: &Session) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Ensure directory exists

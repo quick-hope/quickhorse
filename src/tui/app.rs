@@ -7,7 +7,48 @@ use crate::tui::progress::{ProgressManager, ToolStatus};
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
+
+/// Format error message in a boxed style for TUI display
+fn format_error_box(error_msg: &str) -> Vec<String> {
+    let max_width = 50;
+    let lines: Vec<&str> = error_msg.split('\n').collect();
+
+    // Calculate box width
+    let content_width = lines.iter().map(|l| l.width()).max().unwrap_or(0).min(max_width);
+    let box_width = content_width + 2;
+
+    let border_top = format!("┌─ 错误 ─{}┐", "─".repeat(box_width - 8));
+    let border_bottom = format!("└{}┘", "─".repeat(box_width));
+
+    let mut result = vec![border_top];
+
+    for line in lines {
+        // Truncate if too long
+        let truncated = if line.width() > max_width {
+            // Try to find a truncation point that preserves unicode
+            let mut truncated_line = String::new();
+            let mut width = 0;
+            for c in line.chars() {
+                if width + c.width().unwrap_or(0) > max_width - 3 {
+                    break;
+                }
+                truncated_line.push(c);
+                width += c.width().unwrap_or(0);
+            }
+            truncated_line.push_str("...");
+            truncated_line
+        } else {
+            line.to_string()
+        };
+
+        let padding = box_width - truncated.width() - 2;
+        result.push(format!("│ {}{}│", truncated, " ".repeat(padding)));
+    }
+
+    result.push(border_bottom);
+    result
+}
 
 /// Multiline text editor with proper cursor handling
 #[derive(Debug, Clone)]
@@ -525,10 +566,13 @@ impl App {
                     return false;
                 }
                 StreamEvent::Error(e) => {
-                    // Replace streaming message with error
+                    // Replace streaming message with formatted error
+                    // e already contains user-friendly message from QuickHorseError
+                    let error_lines = format_error_box(&e);
+                    let error_content = error_lines.join("\n");
                     if let Some(last) = self.messages.last_mut() {
                         if last.role == "assistant" {
-                            last.content = vec![ContentBlock::text(format!("Error: {}", e))];
+                            last.content = vec![ContentBlock::text(error_content)];
                         }
                     }
                     self.is_streaming = false;

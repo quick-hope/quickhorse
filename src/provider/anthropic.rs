@@ -1,6 +1,7 @@
 //! Anthropic (Claude) provider implementation
 
 use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel, stream::sse};
+use crate::error::{ErrorCode, QuickHorseError, classify_provider_error, classify_reqwest_error};
 use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
@@ -311,11 +312,17 @@ impl Provider for AnthropicProvider {
             .header("anthropic-dangerous-direct-browser-access", "true")
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                let err = classify_reqwest_error(&e);
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, err.to_user_message_full())) as Box<dyn Error + Send + Sync>
+            })?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("Anthropic API error: {}", error_text).into());
+            let status = response.status().as_u16();
+            let error_text = response.text().await.unwrap_or_default();
+            let err = classify_provider_error("anthropic", status, &error_text);
+            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, err.to_user_message_full())) as Box<dyn Error + Send + Sync>);
         }
 
         let anthropic_response: AnthropicResponse = response.json().await?;
@@ -424,8 +431,11 @@ impl AnthropicProvider {
         match response {
             Ok(resp) => {
                 if !resp.status().is_success() {
-                    let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                    tx.send(StreamEvent::Error(format!("API error: {}", error_text))).await.ok();
+                    let status = resp.status().as_u16();
+                    let error_text = resp.text().await.unwrap_or_default();
+                    let err = classify_provider_error("anthropic", status, &error_text);
+                    // Send user-friendly error message
+                    tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
                     return;
                 }
 
@@ -519,7 +529,20 @@ impl AnthropicProvider {
                                                 return;
                                             }
                                             AnthropicStreamEvent::Error { error } => {
-                                                tx.send(StreamEvent::Error(format!("{}: {}", error.error_type, error.message))).await.ok();
+                                                // Parse Anthropic error type
+                                                let code = match error.error_type.as_str() {
+                                                    "authentication_error" => ErrorCode::AUTHENTICATION_FAILED,
+                                                    "rate_limit_error" => ErrorCode::RATE_LIMIT,
+                                                    "invalid_request_error" => ErrorCode::INVALID_REQUEST,
+                                                    "overloaded_error" => ErrorCode::SERVER_ERROR,
+                                                    "api_error" => ErrorCode::SERVER_ERROR,
+                                                    _ => ErrorCode::SERVER_ERROR,
+                                                };
+                                                let err = QuickHorseError::new(code)
+                                                    .with_details(format!("{}: {}", error.error_type, error.message))
+                                                    .with_source("anthropic".to_string())
+                                                    .with_retryable(code == ErrorCode::RATE_LIMIT || code == ErrorCode::SERVER_ERROR);
+                                                tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
                                                 return;
                                             }
                                             _ => {}
@@ -529,7 +552,11 @@ impl AnthropicProvider {
                             }
                         }
                         Err(e) => {
-                            tx.send(StreamEvent::Error(format!("Stream error: {}", e))).await.ok();
+                            // Network/stream error
+                            let err = QuickHorseError::new(ErrorCode::STREAMING_ERROR)
+                                .with_details(e.to_string())
+                                .with_retryable(true);
+                            tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
                             return;
                         }
                     }
@@ -539,7 +566,9 @@ impl AnthropicProvider {
                 tx.send(StreamEvent::Done).await.ok();
             }
             Err(e) => {
-                tx.send(StreamEvent::Error(format!("Request failed: {}", e))).await.ok();
+                // Use error classification
+                let err = classify_reqwest_error(&e);
+                tx.send(StreamEvent::Error(err.to_user_message())).await.ok();
             }
         }
     }

@@ -38,8 +38,11 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
-      - name: Run tests
-        run: cargo test --verbose --all
+      - name: Run unit tests
+        run: cargo test --lib --verbose
+
+      - name: Run integration tests
+        run: cargo test --test '*' --verbose
 
       - name: Run streaming tests
         run: cargo test --verbose --test streaming_unit_test --test streaming_test
@@ -56,6 +59,63 @@ jobs:
           cargo test --all 2>&1 | tee test_output.txt
           echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
           grep -E "(passed|failed|test result)" test_output.txt >> $GITHUB_STEP_SUMMARY || true
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run provider integration tests
+        run: cargo test --test provider_integration_test --verbose
+
+      - name: Run agent integration tests
+        run: cargo test --test agent_integration_test --verbose
+
+      - name: Run session integration tests
+        run: cargo test --test session_integration_test --verbose
+
+      - name: Run all integration tests
+        run: cargo test --test '*' --verbose --all-features
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Generate coverage report
+        run: cargo tarpaulin --out Xml --skip-clean
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: cobertura.xml
+          fail_ci_if_error: false
 
   build-macos:
     runs-on: macos-latest
