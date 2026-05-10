@@ -1,7 +1,7 @@
 //! UI rendering for TUI
 
 use crate::provider::{ContentBlock, Message};
-use crate::tui::app::{App, InputMode};
+use crate::tui::app::App;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -102,12 +102,13 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let title = if app.is_loading {
         " Waiting for response... "
     } else {
-        " Input (press Enter to send) "
+        " Input (Enter to send, Ctrl+C twice to quit) "
     };
 
-    let style = match app.input_mode {
-        InputMode::Normal => Style::default().fg(Color::Gray),
-        InputMode::Insert => Style::default().fg(Color::White),
+    let style = if app.is_loading {
+        Style::default().fg(Color::Gray)
+    } else {
+        Style::default().fg(Color::White)
     };
 
     let input_widget = Paragraph::new(app.input.as_str())
@@ -117,16 +118,17 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
                 .title(title)
                 .title_style(Style::default().add_modifier(Modifier::BOLD))
                 .borders(Borders::ALL)
-                .border_style(match app.input_mode {
-                    InputMode::Normal => Style::default().fg(Color::Blue),
-                    InputMode::Insert => Style::default().fg(Color::Green),
+                .border_style(if app.is_loading {
+                    Style::default().fg(Color::Gray)
+                } else {
+                    Style::default().fg(Color::Green)
                 }),
         );
 
     f.render_widget(input_widget, area);
 
-    // Show cursor in insert mode
-    if app.input_mode == InputMode::Insert {
+    // Always show cursor when not loading
+    if !app.is_loading {
         let cursor_x = area.x + 1 + app.input.len() as u16;
         let cursor_y = area.y + 1;
         f.set_cursor(cursor_x, cursor_y);
@@ -138,6 +140,11 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             " ⏳ Processing with tools... ",
             Style::default().fg(Color::Yellow),
+        ))
+    } else if app.ctrl_c_count > 0 {
+        Line::from(Span::styled(
+            " ⚠️ Press Ctrl+C again to quit ",
+            Style::default().fg(Color::Red),
         ))
     } else {
         Line::from(Span::styled(
