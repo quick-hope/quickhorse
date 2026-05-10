@@ -47,3 +47,4 @@ regex = "1.10"
 
 # Date/time handling
 chrono = { version = "0.4", features = ["serde"] }
+unicode-width = "0.2.2"

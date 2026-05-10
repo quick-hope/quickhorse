@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 /// Render the TUI
 pub fn render(f: &mut Frame, app: &App) {
@@ -128,8 +129,10 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(input_widget, area);
 
     // Always show cursor when not loading
+    // Use unicode_width for proper cursor positioning with CJK characters
     if !app.is_loading {
-        let cursor_x = area.x + 1 + app.input.len() as u16;
+        let input_width = app.input.width() as u16;
+        let cursor_x = area.x + 1 + input_width;
         let cursor_y = area.y + 1;
         f.set_cursor(cursor_x, cursor_y);
     }
