@@ -1,7 +1,8 @@
 //! Ollama (local models) provider implementation
 
-use crate::provider::{ContentBlock, Message, Provider};
+use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel};
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -147,6 +148,21 @@ struct OllamaFunctionCall {
     arguments: serde_json::Value,
 }
 
+/// Ollama streaming response (JSON lines format)
+#[derive(Deserialize)]
+struct OllamaStreamResponse {
+    message: Option<OllamaStreamMessage>,
+    #[serde(default)]
+    done: bool,
+}
+
+#[derive(Deserialize)]
+struct OllamaStreamMessage {
+    content: String,
+    #[serde(default)]
+    tool_calls: Option<Vec<OllamaToolCall>>,
+}
+
 #[async_trait]
 impl Provider for OllamaProvider {
     fn name(&self) -> &str {
@@ -186,7 +202,7 @@ impl Provider for OllamaProvider {
         let ollama_response: OllamaResponse = response.json().await?;
 
         let mut blocks: Vec<ContentBlock> = Vec::new();
-        
+
         if !ollama_response.message.content.is_empty() {
             blocks.push(ContentBlock::text(ollama_response.message.content));
         }
@@ -233,7 +249,7 @@ impl Provider for OllamaProvider {
         let ollama_response: OllamaResponse = response.json().await?;
 
         let mut blocks: Vec<ContentBlock> = Vec::new();
-        
+
         if !ollama_response.message.content.is_empty() {
             blocks.push(ContentBlock::text(ollama_response.message.content));
         }
@@ -252,8 +268,58 @@ impl Provider for OllamaProvider {
     }
 
     async fn stream_message(&self, messages: &[Message]) -> Result<String, Box<dyn Error + Send + Sync>> {
-        let response = self.send_message(messages).await?;
-        Ok(response.text_content())
+        let (tx, mut rx) = create_stream_channel();
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            messages: Self::messages_to_ollama(messages),
+            stream: true,
+            system: Self::get_system_prompt(messages),
+            tools: None,
+        };
+
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+
+        tokio::spawn(async move {
+            Self::stream_task(client, base_url, request, tx).await;
+        });
+
+        let mut content = String::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                StreamEvent::TextDelta(text) => content.push_str(&text),
+                StreamEvent::Done => break,
+                StreamEvent::Error(e) => return Err(e.into()),
+                _ => {}
+            }
+        }
+
+        Ok(content)
+    }
+
+    async fn stream_message_channel(
+        &self,
+        messages: &[Message],
+    ) -> Result<StreamReceiver, Box<dyn Error + Send + Sync>> {
+        let (tx, rx) = create_stream_channel();
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            messages: Self::messages_to_ollama(messages),
+            stream: true,
+            system: Self::get_system_prompt(messages),
+            tools: None,
+        };
+
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+
+        tokio::spawn(async move {
+            Self::stream_task(client, base_url, request, tx).await;
+        });
+
+        Ok(rx)
     }
 
     fn list_models(&self) -> Vec<String> {
@@ -268,5 +334,93 @@ impl Provider for OllamaProvider {
             "phi3".to_string(),
             "gemma".to_string(),
         ]
+    }
+}
+
+impl OllamaProvider {
+    /// Background streaming task
+    async fn stream_task(
+        client: Client,
+        base_url: String,
+        request: OllamaRequest,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) {
+        let response = client
+            .post(&base_url)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    tx.send(StreamEvent::Error(format!("API error: {}", error_text))).await.ok();
+                    return;
+                }
+
+                // Ollama uses JSON lines streaming (each line is a complete JSON object)
+                let mut stream = resp.bytes_stream();
+                let mut buffer = String::new();
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(bytes) => {
+                            buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                            // Process complete JSON lines
+                            while let Some(newline_pos) = buffer.find('\n') {
+                                let line_str = buffer[..newline_pos].to_string();
+                                let line = line_str.trim();
+                                buffer = buffer[newline_pos + 1..].to_string();
+
+                                if line.is_empty() {
+                                    continue;
+                                }
+
+                                // Parse JSON line
+                                if let Ok(stream_resp) = serde_json::from_str::<OllamaStreamResponse>(line) {
+                                    if let Some(msg) = &stream_resp.message {
+                                        if !msg.content.is_empty() {
+                                            tx.send(StreamEvent::TextDelta(msg.content.clone())).await.ok();
+                                        }
+
+                                        // Handle tool calls in stream
+                                        if let Some(tool_calls) = &msg.tool_calls {
+                                            for tc in tool_calls {
+                                                tx.send(StreamEvent::ToolCallStart {
+                                                    id: format!("call_{}", uuid::Uuid::new_v4()),
+                                                    name: tc.function.name.clone(),
+                                                }).await.ok();
+                                                tx.send(StreamEvent::ToolCallDelta {
+                                                    id: format!("call_{}", uuid::Uuid::new_v4()),
+                                                    arguments: tc.function.arguments.to_string(),
+                                                }).await.ok();
+                                            }
+                                        }
+                                    }
+
+                                    if stream_resp.done {
+                                        tx.send(StreamEvent::Done).await.ok();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tx.send(StreamEvent::Error(format!("Stream error: {}", e))).await.ok();
+                            return;
+                        }
+                    }
+                }
+
+                // Stream ended without done flag
+                tx.send(StreamEvent::Done).await.ok();
+            }
+            Err(e) => {
+                tx.send(StreamEvent::Error(format!("Request failed: {}", e))).await.ok();
+            }
+        }
     }
 }

@@ -1,7 +1,8 @@
 //! Gemini (Google AI) provider implementation
 
-use crate::provider::{ContentBlock, Message, Provider};
+use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel};
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -45,7 +46,12 @@ impl GeminiProvider {
 
     /// Build the full API URL for generateContent
     fn build_url(&self) -> String {
-        format!("{}:generateContent?key={}", self.base_url, self.api_key)
+        format!("{}/{}:generateContent?key={}", self.base_url, self.model, self.api_key)
+    }
+
+    /// Build the full API URL for streaming generateContent
+    fn build_stream_url(&self) -> String {
+        format!("{}/{}:streamGenerateContent?key={}&alt=sse", self.base_url, self.model, self.api_key)
     }
 
     /// Convert messages to Gemini format
@@ -55,9 +61,8 @@ impl GeminiProvider {
 
         for msg in messages {
             if msg.role == "system" {
-                // Gemini uses systemInstruction
                 system_instruction = Some(GeminiContent {
-                    role: "user".to_string(), // Gemini treats system as user
+                    role: "user".to_string(),
                     parts: vec![GeminiPart::Text { text: msg.text_content() }],
                 });
             } else {
@@ -296,7 +301,6 @@ impl Provider for GeminiProvider {
             .first()
             .ok_or("No response from Gemini API")?;
 
-        // Convert response to Message
         let mut blocks: Vec<ContentBlock> = Vec::new();
 
         for part in &candidate.content.parts {
@@ -318,9 +322,44 @@ impl Provider for GeminiProvider {
     }
 
     async fn stream_message(&self, messages: &[Message]) -> Result<String, Box<dyn Error + Send + Sync>> {
-        // For simplicity, use non-streaming
-        let response = self.send_message(messages).await?;
-        Ok(response.text_content())
+        let (tx, mut rx) = create_stream_channel();
+
+        let request = Self::messages_to_gemini(messages);
+        let client = self.client.clone();
+        let stream_url = self.build_stream_url();
+
+        tokio::spawn(async move {
+            Self::stream_task(client, stream_url, request, tx).await;
+        });
+
+        let mut content = String::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                StreamEvent::TextDelta(text) => content.push_str(&text),
+                StreamEvent::Done => break,
+                StreamEvent::Error(e) => return Err(e.into()),
+                _ => {}
+            }
+        }
+
+        Ok(content)
+    }
+
+    async fn stream_message_channel(
+        &self,
+        messages: &[Message],
+    ) -> Result<StreamReceiver, Box<dyn Error + Send + Sync>> {
+        let (tx, rx) = create_stream_channel();
+
+        let request = Self::messages_to_gemini(messages);
+        let client = self.client.clone();
+        let stream_url = self.build_stream_url();
+
+        tokio::spawn(async move {
+            Self::stream_task(client, stream_url, request, tx).await;
+        });
+
+        Ok(rx)
     }
 
     fn list_models(&self) -> Vec<String> {
@@ -332,5 +371,101 @@ impl Provider for GeminiProvider {
             "gemini-2.0-flash-lite".to_string(),
             "gemini-2.5-pro-preview".to_string(),
         ]
+    }
+}
+
+impl GeminiProvider {
+    /// Background streaming task for Gemini
+    async fn stream_task(
+        client: Client,
+        stream_url: String,
+        request: GeminiRequest,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) {
+        let response = client
+            .post(&stream_url)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    tx.send(StreamEvent::Error(format!("API error: {}", error_text))).await.ok();
+                    return;
+                }
+
+                // Gemini streaming uses SSE with JSON data
+                let mut stream = resp.bytes_stream();
+                let mut buffer = String::new();
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(bytes) => {
+                            buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                            // Process SSE lines
+                            while let Some(newline_pos) = buffer.find('\n') {
+                                let line_str = buffer[..newline_pos].to_string();
+                                let line = line_str.trim();
+                                buffer = buffer[newline_pos + 1..].to_string();
+
+                                if line.is_empty() {
+                                    continue;
+                                }
+
+                                // Gemini SSE format: data: <json>
+                                if line.starts_with("data: ") {
+                                    let data = &line[6..];
+
+                                    // Try to parse as Gemini response
+                                    if let Ok(gemini_resp) = serde_json::from_str::<GeminiResponse>(data) {
+                                        if let Some(candidate) = gemini_resp.candidates.first() {
+                                            for part in &candidate.content.parts {
+                                                match part {
+                                                    GeminiResponsePart::Text { text } => {
+                                                        if !text.is_empty() {
+                                                            tx.send(StreamEvent::TextDelta(text.clone())).await.ok();
+                                                        }
+                                                    }
+                                                    GeminiResponsePart::FunctionCall { function_call } => {
+                                                        tx.send(StreamEvent::ToolCallStart {
+                                                            id: format!("call_{}", uuid::Uuid::new_v4()),
+                                                            name: function_call.name.clone(),
+                                                        }).await.ok();
+                                                        tx.send(StreamEvent::ToolCallDelta {
+                                                            id: format!("call_{}", uuid::Uuid::new_v4()),
+                                                            arguments: function_call.args.to_string(),
+                                                        }).await.ok();
+                                                    }
+                                                }
+                                            }
+
+                                            // Check if finished
+                                            if candidate.finish_reason.is_some() {
+                                                tx.send(StreamEvent::Done).await.ok();
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tx.send(StreamEvent::Error(format!("Stream error: {}", e))).await.ok();
+                            return;
+                        }
+                    }
+                }
+
+                // Stream ended
+                tx.send(StreamEvent::Done).await.ok();
+            }
+            Err(e) => {
+                tx.send(StreamEvent::Error(format!("Request failed: {}", e))).await.ok();
+            }
+        }
     }
 }

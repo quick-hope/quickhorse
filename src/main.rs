@@ -10,6 +10,7 @@
 mod agent;
 mod commands;
 mod config;
+mod log;
 mod mcp;
 mod provider;
 mod session;
@@ -59,10 +60,22 @@ struct Args {
     /// Show current configuration
     #[arg(long)]
     config_show: bool,
+
+    /// Enable verbose output (INFO level logging)
+    #[arg(short = 'v', long)]
+    verbose: bool,
+
+    /// Enable debug output (DEBUG level logging)
+    #[arg(short = 'd', long)]
+    debug: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Initialize logging system
+    log::init_from_cli(args.verbose, args.debug)
+        .expect("Failed to initialize logging");
 
     // Version flag
     if args.version {
@@ -227,6 +240,11 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
 
     // Main loop
     loop {
+        // Handle streaming events (non-blocking)
+        if app.is_streaming {
+            app.handle_stream_event();
+        }
+
         // Draw UI
         terminal.draw(|f| render(f, &app))?;
 
@@ -243,8 +261,13 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
                     // Mouse events not handled
                 }
                 Event::Tick => {
+                    // Handle streaming events on tick
+                    if app.is_streaming {
+                        app.handle_stream_event();
+                    }
+
                     // Check if we need to process a pending message
-                    if app.is_loading {
+                    if app.is_loading && !app.is_streaming {
                         // Get user input
                         let last_user_idx = app.messages.iter().rposition(|m| m.role == "user");
                         let last_assistant_idx = app.messages.iter().rposition(|m| m.role == "assistant");
@@ -262,20 +285,36 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
                                 agent.add_message(msg.clone());
                             }
 
-                            // Process with agent (includes tool loop) using runtime
-                            // Don't add user message again - use process_last_user_message
-                            let response = rt.block_on(async {
-                                agent.process_last_user_message().await
+                            // Try streaming first - get messages copy before async
+                            let messages_copy = agent.messages().to_vec();
+                            let provider_ref = agent.provider();
+
+                            let stream_result = rt.block_on(async {
+                                let guard = provider_ref.read().unwrap();
+                                guard.stream_message_channel(&messages_copy).await
                             });
 
-                            match response {
-                                Ok(_content) => {
-                                    // Sync conversation history from agent back to app
-                                    app.messages = agent.messages().to_vec();
-                                    app.is_loading = false;
+                            match stream_result {
+                                Ok(rx) => {
+                                    // Start streaming
+                                    app.start_streaming(rx);
                                 }
-                                Err(e) => {
-                                    app.add_assistant_message(format!("Error: {}", e));
+                                Err(_) => {
+                                    // Fallback to non-streaming
+                                    let response = rt.block_on(async {
+                                        agent.process_last_user_message().await
+                                    });
+
+                                    match response {
+                                        Ok(_content) => {
+                                            // Sync conversation history from agent back to app
+                                            app.messages = agent.messages().to_vec();
+                                            app.is_loading = false;
+                                        }
+                                        Err(e) => {
+                                            app.add_assistant_message(format!("Error: {}", e));
+                                        }
+                                    }
                                 }
                             }
                         }

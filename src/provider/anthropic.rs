@@ -1,7 +1,8 @@
 //! Anthropic (Claude) provider implementation
 
-use crate::provider::{ContentBlock, Message, Provider};
+use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel, stream::sse};
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -50,7 +51,6 @@ impl AnthropicProvider {
 
         for msg in messages {
             if msg.role == "system" {
-                // Anthropic uses separate system parameter
                 system_prompt = Some(msg.text_content());
             } else {
                 let content: Vec<AnthropicContentBlock> = msg
@@ -87,6 +87,18 @@ impl AnthropicProvider {
         }
 
         (system_prompt, anthropic_messages)
+    }
+
+    /// Build streaming request
+    fn build_stream_request(messages: &[Message]) -> AnthropicStreamRequest {
+        let (system, anthropic_messages) = Self::messages_to_anthropic(messages);
+        AnthropicStreamRequest {
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            messages: anthropic_messages,
+            max_tokens: 4096,
+            stream: true,
+            system,
+        }
     }
 }
 
@@ -125,6 +137,17 @@ struct AnthropicRequest {
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<AnthropicTool>>,
+}
+
+/// Anthropic streaming request
+#[derive(Serialize)]
+struct AnthropicStreamRequest {
+    model: String,
+    messages: Vec<AnthropicMessage>,
+    max_tokens: u32,
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
 }
 
 /// Anthropic tool definition
@@ -170,6 +193,61 @@ struct AnthropicUsage {
     output_tokens: u64,
 }
 
+/// Anthropic streaming event types
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicStreamEvent {
+    MessageStart { message: AnthropicStreamMessage },
+    ContentBlockStart { index: u32, content_block: AnthropicStreamContentBlock },
+    ContentBlockDelta { index: u32, delta: AnthropicStreamDelta },
+    ContentBlockStop { index: u32 },
+    MessageDelta { delta: AnthropicStreamMessageDelta, usage: Option<AnthropicStreamUsage> },
+    MessageStop,
+    Ping,
+    Error { error: AnthropicStreamError },
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamMessage {
+    id: String,
+    model: String,
+    role: String,
+    #[serde(default)]
+    content: Vec<AnthropicResponseContent>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicStreamContentBlock {
+    Text { text: String },
+    ToolUse { id: String, name: String },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicStreamDelta {
+    TextDelta { text: String },
+    InputJsonDelta { partial_json: String },
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamMessageDelta {
+    #[serde(default)]
+    stop_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamUsage {
+    output_tokens: u64,
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamError {
+    #[serde(rename = "type")]
+    error_type: String,
+    message: String,
+}
+
 #[async_trait]
 impl Provider for AnthropicProvider {
     fn name(&self) -> &str {
@@ -195,7 +273,6 @@ impl Provider for AnthropicProvider {
     ) -> Result<Message, Box<dyn Error + Send + Sync>> {
         let (system, anthropic_messages) = Self::messages_to_anthropic(messages);
 
-        // Convert tools to Anthropic format
         let anthropic_tools: Option<Vec<AnthropicTool>> = if tools.is_empty() {
             None
         } else {
@@ -203,7 +280,6 @@ impl Provider for AnthropicProvider {
                 tools
                     .iter()
                     .filter_map(|tool| {
-                        // Tool format: {"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}
                         if let Some(function) = tool.get("function") {
                             Some(AnthropicTool {
                                 name: function.get("name")?.as_str()?.to_string(),
@@ -244,7 +320,6 @@ impl Provider for AnthropicProvider {
 
         let anthropic_response: AnthropicResponse = response.json().await?;
 
-        // Convert response to Message
         let mut blocks: Vec<ContentBlock> = Vec::new();
 
         for content in anthropic_response.content {
@@ -262,9 +337,48 @@ impl Provider for AnthropicProvider {
     }
 
     async fn stream_message(&self, messages: &[Message]) -> Result<String, Box<dyn Error + Send + Sync>> {
-        // For simplicity, use non-streaming for now
-        let response = self.send_message(messages).await?;
-        Ok(response.text_content())
+        let (tx, mut rx) = create_stream_channel();
+
+        let request = Self::build_stream_request(messages);
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+
+        tokio::spawn(async move {
+            Self::stream_task(client, base_url, api_key, model, request, tx).await;
+        });
+
+        let mut content = String::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                StreamEvent::TextDelta(text) => content.push_str(&text),
+                StreamEvent::Done => break,
+                StreamEvent::Error(e) => return Err(e.into()),
+                _ => {}
+            }
+        }
+
+        Ok(content)
+    }
+
+    async fn stream_message_channel(
+        &self,
+        messages: &[Message],
+    ) -> Result<StreamReceiver, Box<dyn Error + Send + Sync>> {
+        let (tx, rx) = create_stream_channel();
+
+        let request = Self::build_stream_request(messages);
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+
+        tokio::spawn(async move {
+            Self::stream_task(client, base_url, api_key, model, request, tx).await;
+        });
+
+        Ok(rx)
     }
 
     fn list_models(&self) -> Vec<String> {
@@ -275,5 +389,125 @@ impl Provider for AnthropicProvider {
             "claude-3-sonnet-20240229".to_string(),
             "claude-3-haiku-20240307".to_string(),
         ]
+    }
+}
+
+impl AnthropicProvider {
+    /// Background streaming task for Anthropic
+    async fn stream_task(
+        client: Client,
+        base_url: String,
+        api_key: String,
+        model: String,
+        request: AnthropicStreamRequest,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) {
+        // Build request with the correct model
+        let request = AnthropicStreamRequest {
+            model,
+            messages: request.messages,
+            max_tokens: request.max_tokens,
+            stream: true,
+            system: request.system,
+        };
+
+        let response = client
+            .post(&base_url)
+            .header("x-api-key", &api_key)
+            .header("Content-Type", "application/json")
+            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-dangerous-direct-browser-access", "true")
+            .json(&request)
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    tx.send(StreamEvent::Error(format!("API error: {}", error_text))).await.ok();
+                    return;
+                }
+
+                // Anthropic uses SSE format
+                let mut stream = resp.bytes_stream();
+                let mut buffer = String::new();
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(bytes) => {
+                            buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                            // Process lines
+                            while let Some(newline_pos) = buffer.find('\n') {
+                                let line_str = buffer[..newline_pos].to_string();
+                                let line = line_str.trim();
+                                buffer = buffer[newline_pos + 1..].to_string();
+
+                                if line.is_empty() {
+                                    continue;
+                                }
+
+                                // Parse event type
+                                if let Some(_event_type) = sse::parse_event_line(line) {
+                                    continue;
+                                }
+
+                                // Parse data
+                                if let Some(data) = sse::parse_data_line(line) {
+                                    if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
+                                        match event {
+                                            AnthropicStreamEvent::ContentBlockDelta { index: _, delta } => {
+                                                match delta {
+                                                    AnthropicStreamDelta::TextDelta { text } => {
+                                                        if !text.is_empty() {
+                                                            tx.send(StreamEvent::TextDelta(text)).await.ok();
+                                                        }
+                                                    }
+                                                    AnthropicStreamDelta::InputJsonDelta { partial_json } => {
+                                                        // Tool arguments delta
+                                                        tx.send(StreamEvent::ToolCallDelta {
+                                                            id: "unknown".to_string(),
+                                                            arguments: partial_json,
+                                                        }).await.ok();
+                                                    }
+                                                }
+                                            }
+                                            AnthropicStreamEvent::ContentBlockStart { index: _, content_block } => {
+                                                match content_block {
+                                                    AnthropicStreamContentBlock::ToolUse { id, name } => {
+                                                        tx.send(StreamEvent::ToolCallStart { id, name }).await.ok();
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            AnthropicStreamEvent::MessageStop => {
+                                                tx.send(StreamEvent::Done).await.ok();
+                                                return;
+                                            }
+                                            AnthropicStreamEvent::Error { error } => {
+                                                tx.send(StreamEvent::Error(format!("{}: {}", error.error_type, error.message))).await.ok();
+                                                return;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tx.send(StreamEvent::Error(format!("Stream error: {}", e))).await.ok();
+                            return;
+                        }
+                    }
+                }
+
+                // Stream ended without message_stop
+                tx.send(StreamEvent::Done).await.ok();
+            }
+            Err(e) => {
+                tx.send(StreamEvent::Error(format!("Request failed: {}", e))).await.ok();
+            }
+        }
     }
 }

@@ -1,7 +1,8 @@
 //! OpenAI provider implementation
 
-use crate::provider::{ContentBlock, Message, Provider};
+use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel, stream::sse};
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -212,9 +213,6 @@ impl Provider for OpenAIProvider {
             .ok_or("No response from API")?;
 
         // Convert response to Message
-        let _content_blocks: Vec<ContentBlock> = Vec::new();
-
-        // Add text content if present
         let mut blocks = Vec::new();
         if let Some(text) = &choice.message.content {
             if !text.is_empty() {
@@ -225,7 +223,6 @@ impl Provider for OpenAIProvider {
         // Add tool calls if present
         if let Some(tool_calls) = &choice.message.tool_calls {
             for tc in tool_calls {
-                // Parse arguments from JSON string
                 let input: serde_json::Value = serde_json::from_str(&tc.function.arguments)
                     .unwrap_or(serde_json::json!({ "raw": tc.function.arguments }));
 
@@ -241,8 +238,10 @@ impl Provider for OpenAIProvider {
     }
 
     async fn stream_message(&self, messages: &[Message]) -> Result<String, Box<dyn Error + Send + Sync>> {
-        let openai_messages = Self::messages_to_openai(messages);
+        let (tx, mut rx) = create_stream_channel();
 
+        // Start streaming in background
+        let openai_messages = Self::messages_to_openai(messages);
         let request = ChatRequest {
             model: self.model.clone(),
             messages: openai_messages,
@@ -250,44 +249,54 @@ impl Provider for OpenAIProvider {
             stream: Some(true),
         };
 
-        let response = self
-            .client
-            .post(&self.base_url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
 
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("OpenAI API error: {}", error_text).into());
-        }
+        tokio::spawn(async move {
+            Self::stream_task(client, base_url, api_key, request, tx).await;
+        });
 
-        let full_response = response.text().await?;
-
-        // Parse SSE stream
+        // Accumulate content from stream
         let mut content = String::new();
-        for line in full_response.lines() {
-            if line.starts_with("data: ") {
-                let data = &line[6..];
-                if data == "[DONE]" {
-                    break;
+        while let Some(event) = rx.recv().await {
+            match event {
+                StreamEvent::TextDelta(text) => content.push_str(&text),
+                StreamEvent::Done => break,
+                StreamEvent::Error(e) => {
+                    return Err(e.into());
                 }
-
-                if let Ok(stream_response) = serde_json::from_str::<StreamResponse>(data) {
-                    if let Some(choice) = stream_response.choices.first() {
-                        if let Some(delta) = &choice.delta {
-                            if let Some(delta_content) = &delta.content {
-                                content.push_str(delta_content);
-                            }
-                        }
-                    }
-                }
+                _ => {}
             }
         }
 
         Ok(content)
+    }
+
+    async fn stream_message_channel(
+        &self,
+        messages: &[Message],
+    ) -> Result<StreamReceiver, Box<dyn Error + Send + Sync>> {
+        let (tx, rx) = create_stream_channel();
+
+        let openai_messages = Self::messages_to_openai(messages);
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: openai_messages,
+            tools: None,
+            stream: Some(true),
+        };
+
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+
+        // Spawn background task for streaming
+        tokio::spawn(async move {
+            Self::stream_task(client, base_url, api_key, request, tx).await;
+        });
+
+        Ok(rx)
     }
 
     fn list_models(&self) -> Vec<String> {
@@ -301,22 +310,142 @@ impl Provider for OpenAIProvider {
     }
 }
 
+impl OpenAIProvider {
+    /// Background streaming task
+    async fn stream_task(
+        client: Client,
+        base_url: String,
+        api_key: String,
+        request: ChatRequest,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) {
+        let response = client
+            .post(&base_url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    tx.send(StreamEvent::Error(format!("API error: {}", error_text))).await.ok();
+                    return;
+                }
+
+                // True streaming using bytes_stream()
+                let mut stream = resp.bytes_stream();
+                let mut buffer = String::new();
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(bytes) => {
+                            buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                            // Process complete SSE lines
+                            while let Some(newline_pos) = buffer.find('\n') {
+                                let line_str = buffer[..newline_pos].to_string();
+                                let line = line_str.trim();
+                                buffer = buffer[newline_pos + 1..].to_string();
+
+                                if line.is_empty() {
+                                    continue;
+                                }
+
+                                // Parse SSE data line
+                                if let Some(data) = sse::parse_data_line(line) {
+                                    if sse::is_done(data) {
+                                        tx.send(StreamEvent::Done).await.ok();
+                                        return;
+                                    }
+
+                                    // Parse JSON and extract delta
+                                    if let Ok(stream_resp) = serde_json::from_str::<StreamResponse>(data) {
+                                        if let Some(choice) = stream_resp.choices.first() {
+                                            // Text delta
+                                            if let Some(delta) = &choice.delta {
+                                                if let Some(content) = &delta.content {
+                                                    if !content.is_empty() {
+                                                        tx.send(StreamEvent::TextDelta(content.clone())).await.ok();
+                                                    }
+                                                }
+                                            }
+
+                                            // Tool call delta
+                                            if let Some(tool_calls) = &choice.delta_tool_calls {
+                                                for tc in tool_calls {
+                                                    if let Some(function) = &tc.function {
+                                                        if let Some(name) = &function.name {
+                                                            tx.send(StreamEvent::ToolCallStart {
+                                                                id: tc.id.clone(),
+                                                                name: name.clone(),
+                                                            }).await.ok();
+                                                        }
+                                                        if let Some(args) = &function.arguments {
+                                                            if !args.is_empty() {
+                                                                tx.send(StreamEvent::ToolCallDelta {
+                                                                    id: tc.id.clone(),
+                                                                    arguments: args.clone(),
+                                                                }).await.ok();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tx.send(StreamEvent::Error(format!("Stream error: {}", e))).await.ok();
+                            return;
+                        }
+                    }
+                }
+
+                // Stream ended without explicit [DONE]
+                tx.send(StreamEvent::Done).await.ok();
+            }
+            Err(e) => {
+                tx.send(StreamEvent::Error(format!("Request failed: {}", e))).await.ok();
+            }
+        }
+    }
+}
+
 /// OpenAI streaming response
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct StreamResponse {
     choices: Vec<StreamChoice>,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct StreamChoice {
     delta: Option<Delta>,
+    #[serde(default)]
+    delta_tool_calls: Option<Vec<DeltaToolCall>>,
     finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct Delta {
     content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeltaToolCall {
+    index: Option<u32>,
+    id: String,
+    #[serde(rename = "type")]
+    call_type: Option<String>,
+    function: Option<DeltaFunction>,
+}
+
+#[derive(Deserialize)]
+struct DeltaFunction {
+    name: Option<String>,
+    arguments: Option<String>,
 }

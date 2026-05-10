@@ -56,6 +56,11 @@ impl Agent {
         &self.messages
     }
 
+    /// Get provider reference
+    pub fn provider(&self) -> Arc<RwLock<dyn Provider>> {
+        self.provider.clone()
+    }
+
     /// Add a message to history
     pub fn add_message(&mut self, message: Message) {
         self.messages.push(message);

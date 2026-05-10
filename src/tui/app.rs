@@ -2,8 +2,7 @@
 
 use crate::commands::{CommandRegistry, CommandContext};
 use crate::config::Config;
-use crate::provider::Message;
-use crate::provider::Provider;
+use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver};
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::{Arc, RwLock};
 use unicode_width::UnicodeWidthStr;
@@ -215,6 +214,12 @@ pub struct App {
     pub should_quit: bool,
     /// Whether we're waiting for a response
     pub is_loading: bool,
+    /// Whether we're streaming a response
+    pub is_streaming: bool,
+    /// Stream receiver for real-time updates
+    pub stream_rx: Option<StreamReceiver>,
+    /// Current streaming text being accumulated
+    pub streaming_text: String,
     /// Scroll position for message area
     pub scroll: u16,
     /// Command registry for slash commands
@@ -236,6 +241,9 @@ impl App {
             status: "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string(),
             should_quit: false,
             is_loading: false,
+            is_streaming: false,
+            stream_rx: None,
+            streaming_text: String::new(),
             scroll: 0,
             command_registry: CommandRegistry::new(),
             command_ctx: None,
@@ -253,6 +261,9 @@ impl App {
             status: "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string(),
             should_quit: false,
             is_loading: false,
+            is_streaming: false,
+            stream_rx: None,
+            streaming_text: String::new(),
             scroll: 0,
             command_registry: CommandRegistry::new(),
             command_ctx: Some(ctx),
@@ -434,12 +445,80 @@ impl App {
         let message = Message::assistant(content);
         self.messages.push(message);
         self.is_loading = false;
+        self.is_streaming = false;
     }
 
     /// Set the status message
     #[allow(dead_code)]
     pub fn set_status(&mut self, status: String) {
         self.status = status;
+    }
+
+    /// Start streaming with the given receiver
+    pub fn start_streaming(&mut self, rx: StreamReceiver) {
+        self.stream_rx = Some(rx);
+        self.is_streaming = true;
+        self.is_loading = true;
+        self.streaming_text = String::new();
+
+        // Add placeholder assistant message for streaming updates
+        self.messages.push(Message::assistant(String::new()));
+    }
+
+    /// Handle streaming events (non-blocking)
+    /// Returns true if streaming is still ongoing
+    pub fn handle_stream_event(&mut self) -> bool {
+        if let Some(rx) = &mut self.stream_rx {
+            // Try to receive events without blocking
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    StreamEvent::TextDelta(text) => {
+                        self.streaming_text.push_str(&text);
+                        // Update the last assistant message with streaming content
+                        if let Some(last) = self.messages.last_mut() {
+                            if last.role == "assistant" {
+                                last.content = vec![ContentBlock::text(self.streaming_text.clone())];
+                            }
+                        }
+                    }
+                    StreamEvent::Done => {
+                        // Finalize the streaming message
+                        if let Some(last) = self.messages.last_mut() {
+                            if last.role == "assistant" {
+                                last.content = vec![ContentBlock::text(self.streaming_text.clone())];
+                            }
+                        }
+                        self.is_streaming = false;
+                        self.is_loading = false;
+                        self.stream_rx = None;
+                        self.streaming_text.clear();
+                        return false;
+                    }
+                    StreamEvent::Error(e) => {
+                        // Replace streaming message with error
+                        if let Some(last) = self.messages.last_mut() {
+                            if last.role == "assistant" {
+                                last.content = vec![ContentBlock::text(format!("Error: {}", e))];
+                            }
+                        }
+                        self.is_streaming = false;
+                        self.is_loading = false;
+                        self.stream_rx = None;
+                        self.streaming_text.clear();
+                        return false;
+                    }
+                    // Tool call events - for now, just append info text
+                    StreamEvent::ToolCallStart { id, name } => {
+                        self.streaming_text.push_str(&format!("\n[Tool: {} ({})]\n", name, id));
+                    }
+                    StreamEvent::ToolCallDelta { id: _, arguments } => {
+                        self.streaming_text.push_str(&arguments);
+                    }
+                }
+            }
+            return true; // Still streaming
+        }
+        false
     }
 }
 

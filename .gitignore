@@ -23,6 +23,9 @@ target
 # docs - development notes
 docs/
 
+# QuickHorse runtime files
+.quickhorse/
+
 # Added by cargo
 
 /target

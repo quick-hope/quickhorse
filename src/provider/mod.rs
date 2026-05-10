@@ -4,11 +4,13 @@ mod anthropic;
 mod gemini;
 mod ollama;
 mod openai;
+mod stream;
 
 pub use anthropic::AnthropicProvider;
 pub use gemini::GeminiProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
+pub use stream::{StreamEvent, StreamReceiver, StreamSender, create_stream_channel};
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -237,6 +239,13 @@ pub trait Provider: Send + Sync {
 
     /// Send a message and stream the response (returns full accumulated content)
     async fn stream_message(&self, messages: &[Message]) -> Result<String, Box<dyn Error + Send + Sync>>;
+
+    /// Send a message with real-time streaming via channel
+    /// Returns a receiver that yields StreamEvent
+    async fn stream_message_channel(
+        &self,
+        messages: &[Message],
+    ) -> Result<StreamReceiver, Box<dyn Error + Send + Sync>>;
 
     /// List available models
     fn list_models(&self) -> Vec<String>;
