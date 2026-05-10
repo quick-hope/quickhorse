@@ -1,6 +1,6 @@
 //! Integration tests for QuickHorse tools
 
-use quickhorse::tools::{BashTool, FileReadTool, FileEditTool, GlobTool, Tool, ToolContext, ToolResult};
+use quickhorse::tools::{BashTool, FileReadTool, FileEditTool, GlobTool, Tool, ToolContext};
 
 fn get_context() -> ToolContext {
     ToolContext::default()
