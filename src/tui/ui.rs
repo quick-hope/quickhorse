@@ -5,24 +5,27 @@ use crate::tui::app::App;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
 
 /// Render the TUI
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.size();
 
-    // Create main layout: messages area, input area, status bar
+    // Calculate input area height based on content
+    let input_lines = app.editor.lines().len();
+    let input_height: u16 = (input_lines + 2).min(8).max(3) as u16; // Min 3, max 8 lines
+
+    // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Min(3),    // Messages area
-            Constraint::Length(3), // Input area
-            Constraint::Length(1), // Status bar
+            Constraint::Min(3),                 // Messages area
+            Constraint::Length(input_height),   // Input area
+            Constraint::Length(1),              // Status bar
         ])
         .split(area);
 
@@ -37,73 +40,105 @@ pub fn render(f: &mut Frame, app: &App) {
 }
 
 fn render_messages(f: &mut Frame, app: &App, area: Rect) {
-    let messages: Vec<ListItem> = app
+    let messages: Vec<Line> = app
         .messages
         .iter()
-        .flat_map(|msg| render_message(msg))
+        .flat_map(|msg| render_message_lines(msg))
         .collect();
 
-    let messages_widget = List::new(messages)
-        .block(
-            Block::default()
-                .title(" Messages ")
-                .title_style(Style::default().add_modifier(Modifier::BOLD))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
+    let block = Block::default()
+        .title(" Messages ")
+        .title_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Blue));
 
-    f.render_widget(messages_widget, area);
+    let paragraph = Paragraph::new(messages)
+        .block(block)
+        .scroll((app.scroll, 0));
+
+    f.render_widget(paragraph, area);
 }
 
-/// Render a single message as multiple list items
-fn render_message(msg: &Message) -> Vec<ListItem<'_>> {
-    let items: Vec<ListItem> = msg
-        .content
-        .iter()
-        .map(|block| {
-            match block {
-                ContentBlock::Text { text } => {
-                    let (prefix, style) = match msg.role.as_str() {
-                        "user" => ("You: ", Style::default().fg(Color::Cyan)),
-                        "assistant" => ("Assistant: ", Style::default().fg(Color::Green)),
-                        "system" => ("System: ", Style::default().fg(Color::Yellow)),
-                        _ => ("", Style::default()),
-                    };
-                    let content = format!("{}{}", prefix, text);
-                    ListItem::new(Text::from(content)).style(style)
-                }
-                ContentBlock::ToolUse { id, name, input } => {
-                    let input_str = serde_json::to_string_pretty(&input)
-                        .unwrap_or_else(|_| input.to_string());
-                    let content = format!("🔧 Tool Call: {} ({})\n{}", name, id, input_str);
-                    ListItem::new(Text::from(content))
-                        .style(Style::default().fg(Color::Magenta))
-                }
-                ContentBlock::ToolResult { tool_use_id, content, is_error } => {
-                    let prefix = if is_error.unwrap_or(false) { "❌" } else { "✅" };
-                    let truncated = if content.len() > 500 {
-                        format!("{} Tool Result ({})\n{}...", prefix, tool_use_id, &content[..500])
-                    } else {
-                        format!("{} Tool Result ({})\n{}", prefix, tool_use_id, content)
-                    };
-                    let style = if is_error.unwrap_or(false) {
-                        Style::default().fg(Color::Red)
-                    } else {
-                        Style::default().fg(Color::LightGreen)
-                    };
-                    ListItem::new(Text::from(truncated)).style(style)
+/// Render a message as lines
+fn render_message_lines(msg: &Message) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    for block in &msg.content {
+        match block {
+            ContentBlock::Text { text } => {
+                let (prefix, style) = match msg.role.as_str() {
+                    "user" => ("You: ", Style::default().fg(Color::Cyan)),
+                    "assistant" => ("Assistant: ", Style::default().fg(Color::Green)),
+                    "system" => ("System: ", Style::default().fg(Color::Yellow)),
+                    _ => ("", Style::default()),
+                };
+
+                // Split text into lines for display
+                for line_text in text.lines() {
+                    let line = Line::from(vec![
+                        Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
+                        Span::styled(line_text.to_string(), style),
+                    ]);
+                    lines.push(line);
                 }
             }
-        })
-        .collect();
-    items
+            ContentBlock::ToolUse { id, name, input } => {
+                let input_str = serde_json::to_string_pretty(&input)
+                    .unwrap_or_else(|_| input.to_string());
+                let header = Line::from(Span::styled(
+                    format!("🔧 Tool Call: {} ({})", name, id),
+                    Style::default().fg(Color::Magenta),
+                ));
+                lines.push(header);
+
+                for input_line in input_str.lines() {
+                    let line = Line::from(Span::styled(
+                        format!("  {}", input_line),
+                        Style::default().fg(Color::LightMagenta),
+                    ));
+                    lines.push(line);
+                }
+            }
+            ContentBlock::ToolResult { tool_use_id, content, is_error } => {
+                let prefix = if is_error.unwrap_or(false) { "❌" } else { "✅" };
+                let style = if is_error.unwrap_or(false) {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default().fg(Color::LightGreen)
+                };
+
+                let header = Line::from(Span::styled(
+                    format!("{} Tool Result: {}", prefix, tool_use_id),
+                    style,
+                ));
+                lines.push(header);
+
+                // Show truncated content
+                let display_content = if content.len() > 500 {
+                    format!("{}...", &content[..500])
+                } else {
+                    content.clone()
+                };
+
+                for content_line in display_content.lines() {
+                    let line = Line::from(Span::styled(
+                        format!("  {}", content_line),
+                        style,
+                    ));
+                    lines.push(line);
+                }
+            }
+        }
+    }
+
+    lines
 }
 
 fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let title = if app.is_loading {
         " Waiting for response... "
     } else {
-        " Input (Enter to send, Ctrl+C twice to quit) "
+        " Input (Enter=send, Ctrl+Enter=newline) "
     };
 
     let style = if app.is_loading {
@@ -112,29 +147,42 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::White)
     };
 
-    let input_widget = Paragraph::new(app.input.as_str())
-        .style(style)
+    let border_style = if app.is_loading {
+        Style::default().fg(Color::Gray)
+    } else {
+        Style::default().fg(Color::Green)
+    };
+
+    // Build text with all lines
+    let text_lines: Vec<Line> = app.editor.lines()
+        .iter()
+        .map(|line| Line::from(Span::styled(line.clone(), style)))
+        .collect();
+
+    let input_widget = Paragraph::new(text_lines)
         .block(
             Block::default()
                 .title(title)
                 .title_style(Style::default().add_modifier(Modifier::BOLD))
                 .borders(Borders::ALL)
-                .border_style(if app.is_loading {
-                    Style::default().fg(Color::Gray)
-                } else {
-                    Style::default().fg(Color::Green)
-                }),
+                .border_style(border_style),
         );
 
     f.render_widget(input_widget, area);
 
-    // Always show cursor when not loading
-    // Use unicode_width for proper cursor positioning with CJK characters
+    // Show cursor when not loading
     if !app.is_loading {
-        let input_width = app.input.width() as u16;
-        let cursor_x = area.x + 1 + input_width;
-        let cursor_y = area.y + 1;
-        f.set_cursor(cursor_x, cursor_y);
+        let (cursor_row, _cursor_col) = app.editor.cursor_position();
+        let cursor_display_x = app.editor.cursor_display_x();
+
+        // Cursor position within input area
+        let cursor_x = area.x + 1 + cursor_display_x as u16;
+        let cursor_y = area.y + 1 + cursor_row as u16;
+
+        // Make sure cursor is within bounds
+        if cursor_y < area.y + area.height - 1 {
+            f.set_cursor(cursor_x, cursor_y);
+        }
     }
 }
 
