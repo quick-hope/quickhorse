@@ -20,7 +20,7 @@ mod tui;
 use agent::{Agent, AgentConfig};
 use clap::Parser;
 use config::{Config, ConfigState, SetupWizard};
-use provider::{Message, OpenAIProvider, Provider};
+use provider::{AnthropicProvider, Message, OpenAIProvider, Provider};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tui::{EventHandler, Event, init_terminal, render, restore_terminal};
@@ -174,7 +174,7 @@ fn run_tui_with_args(args: Args, config: Config) -> anyhow::Result<()> {
     let provider_name = args.provider;
     let model = args.model.unwrap_or_else(|| config.get_model(&provider_name));
     let api_key = args.api_key.or_else(|| config.get_api_key(&provider_name));
-    let base_url = args.base_url.or_else(|| config.get_base_url());
+    let args_base_url = args.base_url;
 
     // System prompt from config
     let system_prompt = config.agent.system_prompt.clone().unwrap_or_else(|| {
@@ -183,16 +183,31 @@ fn run_tui_with_args(args: Args, config: Config) -> anyhow::Result<()> {
 
     // Initialize provider
     let provider: Arc<RwLock<dyn Provider>> = match provider_name.as_str() {
+        "anthropic" => {
+            let key = api_key.or_else(|| config.get_api_key("anthropic"))
+                .expect("Anthropic API key required");
+            // Check args base_url first, then config, then env var
+            let url = args_base_url.or_else(|| {
+                config.providers.anthropic.base_url.clone()
+            }).or_else(|| {
+                std::env::var("ANTHROPIC_BASE_URL").ok()
+            });
+            match url {
+                Some(url) => Arc::new(RwLock::new(AnthropicProvider::new_with_base_url(key, model.clone(), url))),
+                None => Arc::new(RwLock::new(AnthropicProvider::new(key, model.clone()))),
+            }
+        }
         "ollama" => {
             // Ollama doesn't need API key
-            let url = base_url.unwrap_or_else(|| config.providers.ollama.url.clone());
+            let url = args_base_url.unwrap_or_else(|| config.providers.ollama.url.clone());
             Arc::new(RwLock::new(provider::OllamaProvider::new_with_base_url(model.clone(), url)))
         }
         _ => {
-            // Other providers need API key
+            // OpenAI and other OpenAI-compatible providers
             match api_key {
                 Some(key) => {
-                    match base_url {
+                    let url = args_base_url.or_else(|| config.get_base_url());
+                    match url {
                         Some(url) => Arc::new(RwLock::new(OpenAIProvider::new_with_base_url(key, model.clone(), url))),
                         None => Arc::new(RwLock::new(OpenAIProvider::new(key, model.clone()))),
                     }

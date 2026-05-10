@@ -108,6 +108,9 @@ pub struct AnthropicConfig {
     /// Default model
     #[serde(default = "default_anthropic_model")]
     pub model: String,
+    /// Custom base URL (for BaiLian Coding Plan, etc.)
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 fn default_anthropic_model() -> String {
@@ -119,6 +122,7 @@ impl Default for AnthropicConfig {
         Self {
             api_key: None,
             model: default_anthropic_model(),
+            base_url: None,
         }
     }
 }

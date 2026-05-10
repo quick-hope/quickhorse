@@ -3,6 +3,7 @@
 use crate::commands::{CommandRegistry, CommandContext};
 use crate::config::Config;
 use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver};
+use crate::tui::progress::{ProgressManager, ToolStatus};
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::{Arc, RwLock};
 use unicode_width::UnicodeWidthStr;
@@ -230,6 +231,8 @@ pub struct App {
     pub ctrl_c_count: u32,
     /// Last Ctrl+C timestamp for timeout
     pub last_ctrl_c_time: Option<std::time::Instant>,
+    /// Progress manager for tool execution indicators
+    pub progress_manager: ProgressManager,
 }
 
 impl App {
@@ -249,6 +252,7 @@ impl App {
             command_ctx: None,
             ctrl_c_count: 0,
             last_ctrl_c_time: None,
+            progress_manager: ProgressManager::new(),
         }
     }
 
@@ -269,6 +273,7 @@ impl App {
             command_ctx: Some(ctx),
             ctrl_c_count: 0,
             last_ctrl_c_time: None,
+            progress_manager: ProgressManager::new(),
         }
     }
 

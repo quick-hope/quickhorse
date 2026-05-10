@@ -3,12 +3,14 @@
 mod app;
 mod cursor;
 mod event;
+mod progress;
 mod terminal;
 mod ui;
 
 pub use app::App;
 pub use cursor::{Cursor, CursorPosition, DoublePressDetector, KillDirection, KillRing, MeasuredText, SelectionDirection};
 pub use event::{Event, EventHandler};
+pub use progress::{ProgressBar, ProgressManager, Spinner, ToolProgress, ToolStatus};
 pub use terminal::{init as init_terminal, restore as restore_terminal};
 pub use ui::render;
 

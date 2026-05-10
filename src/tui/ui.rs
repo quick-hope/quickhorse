@@ -18,12 +18,22 @@ pub fn render(f: &mut Frame, app: &App) {
     let input_lines = app.editor.lines().len();
     let input_height: u16 = (input_lines + 2).min(8).max(3) as u16; // Min 3, max 8 lines
 
+    // Progress area height (show when active)
+    let progress_height: u16 = if app.progress_manager.is_active() {
+        let tool_count = app.progress_manager.active_tool_count();
+        // 1 line for main spinner + 1 line per tool
+        (1 + tool_count).min(5) as u16
+    } else {
+        0
+    };
+
     // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
             Constraint::Min(3),                 // Messages area
+            Constraint::Length(progress_height), // Progress area (dynamic)
             Constraint::Length(input_height),   // Input area
             Constraint::Length(1),              // Status bar
         ])
@@ -32,11 +42,16 @@ pub fn render(f: &mut Frame, app: &App) {
     // Render messages area
     render_messages(f, app, chunks[0]);
 
+    // Render progress area (if active)
+    if progress_height > 0 && chunks[1].height > 0 {
+        render_progress(f, app, chunks[1]);
+    }
+
     // Render input area
-    render_input(f, app, chunks[1]);
+    render_input(f, app, chunks[2]);
 
     // Render status bar
-    render_status(f, app, chunks[2]);
+    render_status(f, app, chunks[3]);
 }
 
 fn render_messages(f: &mut Frame, app: &App, area: Rect) {
@@ -46,15 +61,40 @@ fn render_messages(f: &mut Frame, app: &App, area: Rect) {
         .flat_map(|msg| render_message_lines(msg))
         .collect();
 
+    // Add streaming text if currently streaming
+    let all_lines: Vec<Line> = if app.is_streaming && !app.streaming_text.is_empty() {
+        let streaming_lines: Vec<Line> = app.streaming_text.lines()
+            .map(|line| Line::from(vec![
+                Span::styled("Assistant: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled(line.to_string(), Style::default().fg(Color::Green)),
+            ]))
+            .collect();
+        messages.into_iter().chain(streaming_lines).collect()
+    } else {
+        messages
+    };
+
     let block = Block::default()
         .title(" Messages ")
         .title_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Blue));
 
-    let paragraph = Paragraph::new(messages)
+    let paragraph = Paragraph::new(all_lines)
         .block(block)
         .scroll((app.scroll, 0));
+
+    f.render_widget(paragraph, area);
+}
+
+/// Render progress indicators
+fn render_progress(f: &mut Frame, app: &App, area: Rect) {
+    let progress_lines = app.progress_manager.render(area.width as usize);
+
+    let block = Block::default()
+        .borders(Borders::NONE);
+
+    let paragraph = Paragraph::new(progress_lines).block(block);
 
     f.render_widget(paragraph, area);
 }
