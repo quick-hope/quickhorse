@@ -35,6 +35,7 @@ impl OllamaProvider {
     }
 
     /// Create with default model (llama3)
+    #[allow(dead_code)]
     pub fn with_default_model() -> Self {
         Self::new("llama3".to_string())
     }
@@ -127,6 +128,7 @@ struct OllamaResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct OllamaResponseMessage {
     role: String,
     content: String,

@@ -3,7 +3,7 @@
 use crate::mcp::{
     McpCapabilities, McpImplementationInfo, McpTool, McpResource,
     McpMessage, McpRequest, McpResponse,
-    McpNotification, RequestId, MCP_VERSION,
+    McpNotification, RequestId,
 };
 
 /// MCP Client implementation

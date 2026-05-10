@@ -8,7 +8,7 @@ use std::error::Error;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
-use tokio::io::{AsyncReadExt, AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 /// BashTool input schema
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

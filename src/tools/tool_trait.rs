@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 
 /// Context passed to tool execution
+#[allow(dead_code)]
 pub struct ToolContext {
     /// Current working directory
     pub cwd: String,
@@ -48,6 +49,7 @@ impl ToolResult {
 
 /// Permission check result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum PermissionResult {
     /// Allow the tool to run
     Allow,
@@ -77,15 +79,18 @@ pub trait Tool: Send + Sync {
     ) -> Result<ToolResult, Box<dyn Error + Send + Sync>>;
 
     /// Check if this is a read-only operation
+    #[allow(dead_code)]
     fn is_read_only(&self, input: &serde_json::Value) -> bool;
 
     /// Check permissions for this tool call
+    #[allow(dead_code)]
     fn check_permissions(&self, _input: &serde_json::Value) -> PermissionResult {
         // Default: allow (implementations can override for security)
         PermissionResult::Allow
     }
 
     /// Get a summary of the tool call for display
+    #[allow(dead_code)]
     fn summarize(&self, _input: &serde_json::Value) -> String {
         format!("Running {}", self.name())
     }

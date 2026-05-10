@@ -38,6 +38,7 @@ impl OpenAIProvider {
     }
 
     /// Create with default model
+    #[allow(dead_code)]
     pub fn with_default_model(api_key: String) -> Self {
         Self::new(api_key, "gpt-4".to_string())
     }
@@ -109,6 +110,7 @@ struct ChatRequest {
 
 /// OpenAI chat response
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct ChatResponse {
     choices: Vec<Choice>,
     #[serde(default)]
@@ -116,12 +118,14 @@ struct ChatResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct Choice {
     message: ResponseMessage,
     finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct ResponseMessage {
     role: String,
     #[serde(default)]
@@ -131,6 +135,7 @@ struct ResponseMessage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ToolCall {
     id: String,
     #[serde(rename = "type")]
@@ -145,6 +150,7 @@ struct FunctionCall {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct Usage {
     prompt_tokens: u64,
     completion_tokens: u64,
@@ -297,17 +303,20 @@ impl Provider for OpenAIProvider {
 
 /// OpenAI streaming response
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct StreamResponse {
     choices: Vec<StreamChoice>,
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct StreamChoice {
     delta: Option<Delta>,
     finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct Delta {
     content: Option<String>,
 }

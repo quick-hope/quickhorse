@@ -175,6 +175,7 @@ impl App {
     }
 
     /// Set the status message
+    #[allow(dead_code)]
     pub fn set_status(&mut self, status: String) {
         self.status = status;
     }

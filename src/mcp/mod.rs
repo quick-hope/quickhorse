@@ -2,14 +2,15 @@
 //!
 //! MCP is a JSON-RPC 2.0 based protocol for connecting LLMs to tools, resources, and prompts.
 //! See: https://spec.modelcontextprotocol.io/
+//!
+//! These types are implemented for MCP support but not yet integrated into the main flow.
+#![allow(dead_code)]
 
 mod protocol;
 mod server;
 mod client;
 
-pub use protocol::{McpMessage, McpRequest, McpResponse, McpNotification, McpError, RequestId};
-pub use server::McpServer;
-pub use client::McpClient;
+pub use protocol::{McpMessage, McpRequest, McpResponse, McpNotification, RequestId};
 
 /// MCP protocol version
 pub const MCP_VERSION: &str = "2024-11-05";

@@ -1,6 +1,6 @@
 //! Help Command - /help
 
-use super::{Command, CommandContext, CommandResult, CommandRegistry};
+use super::{Command, CommandContext, CommandResult};
 use async_trait::async_trait;
 
 /// 帮助命令

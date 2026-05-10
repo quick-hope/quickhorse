@@ -1,6 +1,6 @@
 //! Session Persistence - handles saving and loading sessions
 
-use crate::session::{Session, SessionMetadata, SessionId};
+use crate::session::Session;
 use std::path::PathBuf;
 use tokio::fs;
 

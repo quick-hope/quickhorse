@@ -55,6 +55,7 @@ impl CommandContext {
 
 /// 命令执行结果
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CommandResult {
     /// 输出消息（显示给用户）
     pub output: String,
@@ -110,6 +111,7 @@ impl CommandResult {
 
 /// Command trait - 所有 slash 命令的接口
 #[async_trait]
+#[allow(dead_code)]
 pub trait Command: Send + Sync {
     /// 命令名称 (不含 /)
     fn name(&self) -> &str;

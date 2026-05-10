@@ -38,6 +38,7 @@ impl GeminiProvider {
     }
 
     /// Create with default model
+    #[allow(dead_code)]
     pub fn with_default_model(api_key: String) -> Self {
         Self::new(api_key, "gemini-1.5-pro".to_string())
     }
@@ -204,6 +205,7 @@ struct GeminiFunctionDeclaration {
 
 /// Gemini response
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
     #[serde(default)]
@@ -211,6 +213,7 @@ struct GeminiResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct GeminiCandidate {
     content: GeminiResponseContent,
     #[serde(default)]
@@ -218,6 +221,7 @@ struct GeminiCandidate {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct GeminiResponseContent {
     role: String,
     parts: Vec<GeminiResponsePart>,
@@ -239,6 +243,7 @@ struct GeminiFunctionCallResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct GeminiUsageMetadata {
     prompt_token_count: u64,
     candidates_token_count: u64,

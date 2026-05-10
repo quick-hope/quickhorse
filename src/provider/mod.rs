@@ -169,11 +169,13 @@ impl Message {
     }
 
     /// Check if message contains tool uses
+    #[allow(dead_code)]
     pub fn has_tool_uses(&self) -> bool {
         self.content.iter().any(|block| matches!(block, ContentBlock::ToolUse { .. }))
     }
 
     /// Convert to OpenAI API format
+    #[allow(dead_code)]
     pub fn to_openai_format(&self) -> serde_json::Value {
         let content: Vec<serde_json::Value> = self
             .content
@@ -212,6 +214,7 @@ impl Message {
 
 /// Provider trait for LLM implementations
 #[async_trait]
+#[allow(dead_code)]
 pub trait Provider: Send + Sync {
     /// Get provider name
     fn name(&self) -> &str;
@@ -241,6 +244,7 @@ pub trait Provider: Send + Sync {
 
 /// Provider types
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub enum ProviderType {
     OpenAI,
     Anthropic,

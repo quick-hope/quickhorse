@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 /// Terminal events
+#[allow(dead_code)]
 pub enum Event {
     /// Key press event
     Key(KeyEvent),
@@ -83,6 +84,7 @@ impl EventHandler {
     }
 
     /// Try to receive an event (non-blocking)
+    #[allow(dead_code)]
     pub fn try_recv(&self) -> Result<Event, mpsc::TryRecvError> {
         self.rx.try_recv()
     }

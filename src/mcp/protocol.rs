@@ -1,4 +1,7 @@
 //! MCP Protocol - JSON-RPC 2.0 message types
+//!
+//! These types are implemented for MCP support but not yet integrated into the main flow.
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 

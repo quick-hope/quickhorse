@@ -2,10 +2,10 @@
 
 use crate::mcp::{
     McpCapabilities, McpImplementationInfo, McpTool, McpResource, McpPrompt,
-    McpMessage, McpRequest, McpResponse, McpNotification, McpError,
+    McpMessage, McpRequest, McpResponse,
     MCP_VERSION,
 };
-use crate::tools::{Tool, ToolRegistry, ToolContext};
+use crate::tools::{ToolRegistry, ToolContext};
 use std::sync::Arc;
 
 /// MCP Server implementation

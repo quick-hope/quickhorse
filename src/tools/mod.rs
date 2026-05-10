@@ -14,7 +14,7 @@ pub use file_read::FileReadTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use web_fetch::WebFetchTool;
-pub use tool_trait::{Tool, ToolContext, ToolResult, PermissionResult};
+pub use tool_trait::{Tool, ToolContext, ToolResult};
 
 use std::collections::HashMap;
 use std::sync::Arc;

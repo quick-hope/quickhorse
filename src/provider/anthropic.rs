@@ -38,6 +38,7 @@ impl AnthropicProvider {
     }
 
     /// Create with default model (Claude 3.5 Sonnet)
+    #[allow(dead_code)]
     pub fn with_default_model(api_key: String) -> Self {
         Self::new(api_key, "claude-3-5-sonnet-20241022".to_string())
     }
@@ -137,6 +138,7 @@ struct AnthropicTool {
 
 /// Anthropic response
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct AnthropicResponse {
     id: String,
     #[serde(rename = "type")]
@@ -162,6 +164,7 @@ enum AnthropicResponseContent {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct AnthropicUsage {
     input_tokens: u64,
     output_tokens: u64,

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 命令注册表 - 存储和管理所有命令
+#[allow(dead_code)]
 pub struct CommandRegistry {
     /// 命令映射表
     commands: HashMap<String, Arc<dyn Command>>,
@@ -34,6 +35,7 @@ impl CommandRegistry {
     }
 
     /// 获取命令
+    #[allow(dead_code)]
     pub fn get(&self, name: &str) -> Option<Arc<dyn Command>> {
         self.commands.get(name).cloned()
     }
@@ -85,6 +87,7 @@ impl CommandRegistry {
     }
 
     /// 获取所有命令的帮助文本
+    #[allow(dead_code)]
     pub fn get_all_help(&self) -> Vec<String> {
         self.commands
             .values()
@@ -93,6 +96,7 @@ impl CommandRegistry {
     }
 
     /// 获取命令列表
+    #[allow(dead_code)]
     pub fn list_commands(&self) -> Vec<&str> {
         self.commands.keys().map(|s| s.as_str()).collect()
     }

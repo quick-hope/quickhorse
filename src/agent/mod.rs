@@ -46,6 +46,7 @@ impl Agent {
     }
 
     /// Add a tool to the registry
+    #[allow(dead_code)]
     pub fn add_tool(&mut self, tool: Arc<dyn Tool>) {
         self.tools.register(tool);
     }
@@ -77,7 +78,6 @@ impl Agent {
     /// Run the tool call loop
     async fn run_loop(&mut self) -> Result<String, Box<dyn Error + Send + Sync>> {
         let mut iteration = 0;
-        let mut final_text = String::new();
 
         // Get tool schemas for API
         let tool_schemas = self.tools.schemas_for_api();
@@ -103,8 +103,7 @@ impl Agent {
 
             if tool_uses.is_empty() {
                 // No tools - return text content
-                final_text = response.text_content();
-                break;
+                return Ok(response.text_content());
             }
 
             // Execute tools and collect results
@@ -126,8 +125,6 @@ impl Agent {
             // Add tool results as user message
             self.messages.push(Message::user_with_tool_results(tool_results));
         }
-
-        Ok(final_text)
     }
 
     /// Execute a single tool

@@ -1,8 +1,10 @@
 //! Session module - Session management and persistence
+//!
+//! These types are implemented for session support but not yet integrated into the main flow.
+#![allow(dead_code)]
 
 mod persistence;
 
-pub use persistence::{SessionPersistence, SessionStorage};
 
 use crate::provider::Message;
 use serde::{Deserialize, Serialize};
@@ -22,6 +24,7 @@ impl SessionId {
     }
 
     /// Create from string
+    #[allow(dead_code)]
     pub fn from_string(s: String) -> Self {
         Self(s)
     }
