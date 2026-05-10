@@ -53,8 +53,7 @@ struct Args {
     list_tools: bool,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     if args.version {
@@ -110,6 +109,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: String) -> anyhow::Result<()> {
+    // Create tokio runtime for async operations
+    let rt = tokio::runtime::Runtime::new()?;
+
     // Initialize terminal
     let mut terminal = init_terminal()?;
 
@@ -177,9 +179,8 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
                                 agent.add_message(msg.clone());
                             }
 
-                            // Process with agent (includes tool loop)
-                            let response = tokio::runtime::Handle::current().block_on(async {
-                                // Skip re-processing, just get response for new input
+                            // Process with agent (includes tool loop) using runtime
+                            let response = rt.block_on(async {
                                 agent.process(user_text).await
                             });
 

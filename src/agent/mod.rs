@@ -106,21 +106,20 @@ impl Agent {
                 return Ok(response.text_content());
             }
 
-            // Execute tools and collect results
-            let tool_results: Vec<ContentBlock> = tool_uses
-                .iter()
-                .map(|block| {
-                    if let ContentBlock::ToolUse { id, name, input } = block {
-                        self.execute_tool(id.clone(), name.clone(), input.clone())
-                    } else {
-                        ContentBlock::tool_result(
-                            "unknown".to_string(),
-                            "Invalid tool call".to_string(),
-                            true,
-                        )
-                    }
-                })
-                .collect();
+            // Execute tools sequentially and collect results
+            let mut tool_results: Vec<ContentBlock> = Vec::new();
+            for block in tool_uses.iter() {
+                if let ContentBlock::ToolUse { id, name, input } = block {
+                    let result = self.execute_tool(id.clone(), name.clone(), input.clone()).await;
+                    tool_results.push(result);
+                } else {
+                    tool_results.push(ContentBlock::tool_result(
+                        "unknown".to_string(),
+                        "Invalid tool call".to_string(),
+                        true,
+                    ));
+                }
+            }
 
             // Add tool results as user message
             self.messages.push(Message::user_with_tool_results(tool_results));
@@ -128,7 +127,7 @@ impl Agent {
     }
 
     /// Execute a single tool
-    fn execute_tool(&self, tool_id: String, name: String, input: serde_json::Value) -> ContentBlock {
+    async fn execute_tool(&self, tool_id: String, name: String, input: serde_json::Value) -> ContentBlock {
         // Get tool from registry
         let tool = self.tools.get(&name);
 
@@ -143,10 +142,8 @@ impl Agent {
         let tool = tool.unwrap();
         let context = ToolContext::default();
 
-        // Execute tool (blocking for now)
-        let result = tokio::runtime::Handle::current().block_on(async {
-            tool.call(input.clone(), &context).await
-        });
+        // Execute tool
+        let result = tool.call(input.clone(), &context).await;
 
         match result {
             Ok(ToolResult { content, is_error }) => {
