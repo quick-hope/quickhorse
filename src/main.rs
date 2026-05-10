@@ -18,7 +18,7 @@ mod tui;
 
 use agent::{Agent, AgentConfig};
 use clap::Parser;
-use config::Config;
+use config::{Config, ConfigState, SetupWizard};
 use provider::{Message, OpenAIProvider, Provider};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -51,11 +51,20 @@ struct Args {
     /// Print available tools
     #[arg(long)]
     list_tools: bool,
+
+    /// Run setup wizard to configure QuickHorse
+    #[arg(long)]
+    setup: bool,
+
+    /// Show current configuration
+    #[arg(long)]
+    config_show: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    // Version flag
     if args.version {
         println!("QuickHorse v0.1.0");
         return Ok(());
@@ -71,40 +80,121 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Load configuration
-    let config = Config::load().unwrap_or_else(|e| {
-        eprintln!("Warning: Could not load config: {}", e);
-        Config::default()
-    });
+    // Show configuration mode
+    if args.config_show {
+        match Config::load_existing() {
+            Ok(config) => SetupWizard::show_config(&config),
+            Err(e) => {
+                println!("Configuration not found or invalid: {}", e);
+                println!("Run 'quickhorse --setup' to create configuration.");
+            }
+        }
+        return Ok(());
+    }
 
-    // Determine provider and model
+    // Setup wizard mode
+    if args.setup {
+        let config = SetupWizard::run()?;
+        run_tui_with_args(args, config)?;
+        return Ok(());
+    }
+
+    // Check configuration state for first-run detection
+    let config_state = Config::check_state();
+
+    match config_state {
+        ConfigState::NotExists => {
+            // First run - no configuration exists
+            println!("QuickHorse v0.1.0 - First Run Setup");
+            println!();
+            println!("No configuration found. Running setup wizard...");
+            println!();
+            let config = SetupWizard::run()?;
+            run_tui_with_args(args, config)?;
+        }
+        ConfigState::NoApiKey => {
+            // Configuration exists but no API key for default provider
+            println!("QuickHorse v0.1.0");
+            println!();
+            println!("Configuration found but no API key for default provider.");
+            println!();
+            println!("Options:");
+            println!("  1) Run setup wizard:    quickhorse --setup");
+            println!("  2) Set environment var: OPENAI_API_KEY=xxx quickhorse");
+            println!("  3) Edit config file:    ~/.quickhorse/config.toml");
+            println!();
+
+            // Try to load config and show which provider needs key
+            if let Ok(config) = Config::load_existing() {
+                println!("Default provider '{}' requires an API key.", config.default_provider);
+                println!();
+
+                // For Ollama, no key is needed
+                if config.default_provider == "ollama" {
+                    println!("Starting with Ollama (no API key required)...");
+                    run_tui_with_args(args, config)?;
+                    return Ok(());
+                }
+            }
+
+            // Prompt to run setup
+            println!("Press Enter to run setup wizard, or Ctrl+C to exit.");
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).ok();
+
+            let config = SetupWizard::run()?;
+            run_tui_with_args(args, config)?;
+        }
+        ConfigState::Ready => {
+            // Configuration complete - normal startup
+            let config = Config::load()?;
+            run_tui_with_args(args, config)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Run TUI with arguments and loaded configuration
+fn run_tui_with_args(args: Args, config: Config) -> anyhow::Result<()> {
+    // Determine provider and model from args or config
     let provider_name = args.provider;
     let model = args.model.unwrap_or_else(|| config.get_model(&provider_name));
     let api_key = args.api_key.or_else(|| config.get_api_key(&provider_name));
     let base_url = args.base_url.or_else(|| config.get_base_url());
 
-    // Initialize provider
-    let provider: Arc<RwLock<dyn Provider>> = match api_key {
-        Some(key) => {
-            match base_url {
-                Some(url) => Arc::new(RwLock::new(OpenAIProvider::new_with_base_url(key, model.clone(), url))),
-                None => Arc::new(RwLock::new(OpenAIProvider::new(key, model.clone()))),
-            }
-        }
-        None => {
-            eprintln!("Error: No API key provided. Set OPENAI_API_KEY environment variable or use --api-key");
-            std::process::exit(1);
-        }
-    };
-
-    // System prompt
+    // System prompt from config
     let system_prompt = config.agent.system_prompt.clone().unwrap_or_else(|| {
         AgentConfig::default().system_prompt.clone()
     });
 
-    // Run TUI
-    run_tui(provider, config, system_prompt)?;
+    // Initialize provider
+    let provider: Arc<RwLock<dyn Provider>> = match provider_name.as_str() {
+        "ollama" => {
+            // Ollama doesn't need API key
+            let url = base_url.unwrap_or_else(|| config.providers.ollama.url.clone());
+            Arc::new(RwLock::new(provider::OllamaProvider::new_with_base_url(model.clone(), url)))
+        }
+        _ => {
+            // Other providers need API key
+            match api_key {
+                Some(key) => {
+                    match base_url {
+                        Some(url) => Arc::new(RwLock::new(OpenAIProvider::new_with_base_url(key, model.clone(), url))),
+                        None => Arc::new(RwLock::new(OpenAIProvider::new(key, model.clone()))),
+                    }
+                }
+                None => {
+                    eprintln!("Error: No API key for provider '{}'.", provider_name);
+                    eprintln!("Set {}_API_KEY environment variable or run 'quickhorse --setup'.",
+                        provider_name.to_uppercase());
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
 
+    run_tui(provider, config, system_prompt)?;
     Ok(())
 }
 

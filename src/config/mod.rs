@@ -1,9 +1,24 @@
 //! Configuration management module
 
+mod setup;
+
+pub use setup::SetupWizard;
+
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+
+/// Configuration state for first-run detection
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ConfigState {
+    /// Configuration file does not exist
+    NotExists,
+    /// Configuration exists but no API key for default provider
+    NoApiKey,
+    /// Configuration complete, ready to start
+    Ready,
+}
 
 /// Main configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +190,7 @@ pub struct AgentConfig {
 }
 
 impl Config {
-    /// Load configuration from file, creating default if not exists
+    /// Load configuration from file (creates default if not exists)
     pub fn load() -> Result<Self, ConfigError> {
         let config_path = Self::config_path()?;
 
@@ -183,6 +198,23 @@ impl Config {
             let config = Self::default();
             config.save()?;
             return Ok(config);
+        }
+
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| ConfigError::Read(config_path.clone(), e))?;
+
+        toml::from_str(&content).map_err(ConfigError::Parse)
+    }
+
+    /// Load configuration from file without creating default
+    pub fn load_existing() -> Result<Self, ConfigError> {
+        let config_path = Self::config_path()?;
+
+        if !config_path.exists() {
+            return Err(ConfigError::Read(config_path, std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Configuration file not found"
+            )));
         }
 
         let content = fs::read_to_string(&config_path)
@@ -248,6 +280,82 @@ impl Config {
             env::var("OPENAI_BASE_URL").ok()
         })
     }
+
+    /// Check if configuration file exists
+    #[allow(dead_code)]
+    pub fn exists() -> bool {
+        Self::config_path().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    /// Check configuration state for first-run detection
+    pub fn check_state() -> ConfigState {
+        let config_path = match Self::config_path() {
+            Ok(p) => p,
+            Err(_) => return ConfigState::NotExists,
+        };
+
+        // Check if file exists (don't create default)
+        if !config_path.exists() {
+            return ConfigState::NotExists;
+        }
+
+        // Try to load config
+        let content = match fs::read_to_string(&config_path) {
+            Ok(c) => c,
+            Err(_) => return ConfigState::NotExists,
+        };
+
+        let config: Config = match toml::from_str(&content) {
+            Ok(c) => c,
+            Err(_) => return ConfigState::NotExists,
+        };
+
+        if config.default_provider_has_api_key() {
+            ConfigState::Ready
+        } else {
+            ConfigState::NoApiKey
+        }
+    }
+
+    /// Check if default provider has API key configured
+    fn default_provider_has_api_key(&self) -> bool {
+        // Ollama doesn't require API key
+        if self.default_provider == "ollama" {
+            return true;
+        }
+        self.get_api_key(&self.default_provider).is_some()
+    }
+
+    /// Set API key for a provider
+    pub fn set_api_key(&mut self, provider: &str, key: String) {
+        match provider {
+            "openai" => self.providers.openai.api_key = Some(key),
+            "anthropic" => self.providers.anthropic.api_key = Some(key),
+            "gemini" => self.providers.gemini.api_key = Some(key),
+            _ => {}
+        }
+    }
+
+    /// Set model for a provider
+    pub fn set_model(&mut self, provider: &str, model: String) {
+        match provider {
+            "openai" => self.providers.openai.model = model,
+            "anthropic" => self.providers.anthropic.model = model,
+            "gemini" => self.providers.gemini.model = model,
+            "ollama" => self.providers.ollama.model = model,
+            _ => {}
+        }
+    }
+
+    /// Set base URL for OpenAI provider
+    pub fn set_base_url(&mut self, url: String) {
+        self.providers.openai.base_url = Some(url);
+    }
+
+    /// Set default provider
+    pub fn set_default_provider(&mut self, provider: String) {
+        self.default_provider = provider;
+    }
 }
 
 /// Configuration errors
@@ -264,7 +372,7 @@ pub enum ConfigError {
     /// Failed to parse config
     Parse(toml::de::Error),
     /// Failed to serialize config
-    Serialize(Box<dyn std::error::Error>),
+    Serialize(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl std::fmt::Display for ConfigError {
