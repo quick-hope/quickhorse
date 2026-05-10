@@ -147,6 +147,18 @@ struct OllamaFunctionCall {
 
 #[async_trait]
 impl Provider for OllamaProvider {
+    fn name(&self) -> &str {
+        "ollama"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn set_model(&mut self, model: String) {
+        self.model = model;
+    }
+
     async fn send_message(&self, messages: &[Message]) -> Result<Message, Box<dyn Error + Send + Sync>> {
         let request = OllamaRequest {
             model: self.model.clone(),

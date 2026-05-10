@@ -169,6 +169,18 @@ struct AnthropicUsage {
 
 #[async_trait]
 impl Provider for AnthropicProvider {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn set_model(&mut self, model: String) {
+        self.model = model;
+    }
+
     async fn send_message(&self, messages: &[Message]) -> Result<Message, Box<dyn Error + Send + Sync>> {
         self.send_message_with_tools(messages, &[]).await
     }

@@ -213,6 +213,15 @@ impl Message {
 /// Provider trait for LLM implementations
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// Get provider name
+    fn name(&self) -> &str;
+
+    /// Get current model name
+    fn model(&self) -> &str;
+
+    /// Set model name
+    fn set_model(&mut self, model: String);
+
     /// Send a message and get a response (non-streaming)
     async fn send_message(&self, messages: &[Message]) -> Result<Message, Box<dyn Error + Send + Sync>>;
 

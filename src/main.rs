@@ -5,8 +5,10 @@
 //! - Tools (Bash, FileRead, FileWrite, Grep, Glob, WebFetch)
 //! - MCP protocol support
 //! - Session management
+//! - Slash commands
 
 mod agent;
+mod commands;
 mod config;
 mod mcp;
 mod provider;
@@ -18,9 +20,9 @@ use agent::{Agent, AgentConfig};
 use clap::Parser;
 use config::Config;
 use provider::{Message, OpenAIProvider, Provider};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tui::{App, EventHandler, Event, init_terminal, render, restore_terminal};
+use tui::{EventHandler, Event, init_terminal, render, restore_terminal};
 
 #[derive(Parser, Debug)]
 #[command(name = "quickhorse")]
@@ -83,11 +85,11 @@ async fn main() -> anyhow::Result<()> {
     let base_url = args.base_url.or_else(|| config.get_base_url());
 
     // Initialize provider
-    let provider: Arc<dyn Provider> = match api_key {
+    let provider: Arc<RwLock<dyn Provider>> = match api_key {
         Some(key) => {
             match base_url {
-                Some(url) => Arc::new(OpenAIProvider::new_with_base_url(key, model.clone(), url)),
-                None => Arc::new(OpenAIProvider::new(key, model.clone())),
+                Some(url) => Arc::new(RwLock::new(OpenAIProvider::new_with_base_url(key, model.clone(), url))),
+                None => Arc::new(RwLock::new(OpenAIProvider::new(key, model.clone()))),
             }
         }
         None => {
@@ -102,17 +104,17 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Run TUI
-    run_tui(provider, system_prompt)?;
+    run_tui(provider, config, system_prompt)?;
 
     Ok(())
 }
 
-fn run_tui(provider: Arc<dyn Provider>, system_prompt: String) -> anyhow::Result<()> {
+fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: String) -> anyhow::Result<()> {
     // Initialize terminal
     let mut terminal = init_terminal()?;
 
-    // Create app and event handler
-    let mut app = App::new();
+    // Create app with provider and event handler
+    let mut app = tui::App::with_provider(provider.clone(), config);
     let events = EventHandler::new(Duration::from_millis(250));
 
     // Create agent with tool support
@@ -125,7 +127,10 @@ fn run_tui(provider: Arc<dyn Provider>, system_prompt: String) -> anyhow::Result
     // Add system message
     app.messages.push(Message::system(system_prompt));
     app.messages.push(Message::assistant(
-        "Hello! I'm QuickHorse, your CLI coding assistant with tool support.\nI can execute commands, read files, and help with programming tasks.\nHow can I help you today?".to_string()
+        "Hello! I'm QuickHorse, your CLI coding assistant with tool support.\n\
+         I can execute commands, read files, and help with programming tasks.\n\
+         Type /help to see available commands.\n\
+         How can I help you today?".to_string()
     ));
 
     // Main loop

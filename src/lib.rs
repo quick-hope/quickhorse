@@ -2,11 +2,13 @@
 //!
 //! This crate provides a lightweight coding agent with:
 //! - Multiple LLM providers (OpenAI, Anthropic, Gemini, Ollama)
-//! - Tools (Bash, FileRead, FileEdit, Glob, Grep)
+//! - Tools (Bash, FileRead, FileEdit, Glob, Grep, WebFetch)
 //! - MCP protocol support
 //! - Session management
+//! - Slash commands
 
 pub mod agent;
+pub mod commands;
 pub mod config;
 pub mod mcp;
 pub mod provider;

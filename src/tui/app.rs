@@ -1,7 +1,11 @@
 //! Application state management
 
+use crate::commands::{CommandRegistry, CommandContext};
+use crate::config::Config;
 use crate::provider::Message;
+use crate::provider::Provider;
 use crossterm::event::{KeyCode, KeyModifiers};
+use std::sync::{Arc, RwLock};
 
 /// Input mode for the TUI
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,6 +32,10 @@ pub struct App {
     pub is_loading: bool,
     /// Scroll position for message area
     pub scroll: u16,
+    /// Command registry for slash commands
+    pub command_registry: CommandRegistry,
+    /// Command context
+    pub command_ctx: Option<CommandContext>,
 }
 
 impl App {
@@ -41,6 +49,24 @@ impl App {
             should_quit: false,
             is_loading: false,
             scroll: 0,
+            command_registry: CommandRegistry::new(),
+            command_ctx: None,
+        }
+    }
+
+    /// Create App with Provider
+    pub fn with_provider(provider: Arc<RwLock<dyn Provider>>, config: Config) -> Self {
+        let ctx = CommandContext::new(provider, config);
+        Self {
+            input_mode: InputMode::Normal,
+            input: String::new(),
+            messages: Vec::new(),
+            status: "Press 'i' to enter input mode, 'Esc' to exit, 'q' to quit".to_string(),
+            should_quit: false,
+            is_loading: false,
+            scroll: 0,
+            command_registry: CommandRegistry::new(),
+            command_ctx: Some(ctx),
         }
     }
 
@@ -81,11 +107,38 @@ impl App {
             }
             KeyCode::Enter => {
                 if !self.input.is_empty() {
-                    // Add user message
-                    let user_message = Message::user(self.input.clone());
-                    self.messages.push(user_message);
+                    // Check if it's a slash command
+                    if CommandRegistry::is_command(&self.input) {
+                        if let Some(ctx) = &mut self.command_ctx {
+                            let result = self.command_registry.execute(&self.input, ctx);
+                            match result {
+                                Some(cmd_result) => {
+                                    self.messages.push(Message::assistant(cmd_result.output));
+                                    if cmd_result.clear_history {
+                                        self.messages.clear();
+                                    }
+                                    if cmd_result.provider_changed {
+                                        self.status = format!("Provider: {}", ctx.current_provider_name);
+                                    }
+                                }
+                                None => {
+                                    self.messages.push(Message::assistant(format!("Unknown command: {}", self.input)));
+                                }
+                            }
+                            // Sync messages
+                            ctx.messages = self.messages.clone();
+                        } else {
+                            self.messages.push(Message::assistant(
+                                "Commands not available. Please restart with a provider.".to_string()
+                            ));
+                        }
+                    } else {
+                        // Normal message processing
+                        let user_message = Message::user(self.input.clone());
+                        self.messages.push(user_message);
+                        self.is_loading = true;
+                    }
                     self.input.clear();
-                    self.is_loading = true;
                 }
             }
             KeyCode::Char(c) => {

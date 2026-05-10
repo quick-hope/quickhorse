@@ -1,8 +1,12 @@
 //! Session module - Session management and persistence
 
+mod persistence;
+
+pub use persistence::{SessionPersistence, SessionStorage};
+
 use crate::provider::Message;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
 use uuid::Uuid;

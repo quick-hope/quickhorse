@@ -2,7 +2,7 @@
 
 use crate::provider::{ContentBlock, Message, Provider};
 use crate::tools::{Tool, ToolContext, ToolRegistry, ToolResult};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::error::Error;
 
 /// Agent configuration
@@ -24,8 +24,8 @@ impl Default for AgentConfig {
 
 /// Agent that manages conversation with tools
 pub struct Agent {
-    /// Provider for LLM calls
-    provider: Arc<dyn Provider>,
+    /// Provider for LLM calls (wrapped in RwLock for dynamic switching)
+    provider: Arc<RwLock<dyn Provider>>,
     /// Tool registry
     tools: ToolRegistry,
     /// Configuration
@@ -36,7 +36,7 @@ pub struct Agent {
 
 impl Agent {
     /// Create a new agent
-    pub fn new(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
+    pub fn new(provider: Arc<RwLock<dyn Provider>>, config: AgentConfig) -> Self {
         Self {
             provider,
             tools: ToolRegistry::with_default_tools(),
@@ -88,8 +88,10 @@ impl Agent {
                 return Err(format!("Max iterations ({}) reached", self.config.max_iterations).into());
             }
 
-            // Call provider with tools
+            // Call provider with tools (acquire read lock)
             let response = self.provider
+                .read()
+                .unwrap()
                 .send_message_with_tools(&self.messages, &tool_schemas)
                 .await?;
 
