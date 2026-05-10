@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver};
 use crate::tui::progress::{ProgressManager, ToolStatus};
 use crossterm::event::{KeyCode, KeyModifiers};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use unicode_width::UnicodeWidthStr;
 
@@ -233,6 +234,8 @@ pub struct App {
     pub last_ctrl_c_time: Option<std::time::Instant>,
     /// Progress manager for tool execution indicators
     pub progress_manager: ProgressManager,
+    /// Mapping from tool_id to progress manager index
+    tool_progress_map: HashMap<String, usize>,
 }
 
 impl App {
@@ -253,6 +256,7 @@ impl App {
             ctrl_c_count: 0,
             last_ctrl_c_time: None,
             progress_manager: ProgressManager::new(),
+            tool_progress_map: HashMap::new(),
         }
     }
 
@@ -274,6 +278,7 @@ impl App {
             ctrl_c_count: 0,
             last_ctrl_c_time: None,
             progress_manager: ProgressManager::new(),
+            tool_progress_map: HashMap::new(),
         }
     }
 
@@ -480,57 +485,127 @@ impl App {
     /// Handle streaming events (non-blocking)
     /// Returns true if streaming is still ongoing
     pub fn handle_stream_event(&mut self) -> bool {
+        // Collect events first to avoid borrow conflicts
+        let mut events_to_process: Vec<StreamEvent> = Vec::new();
+        let mut still_streaming = false;
+
         if let Some(rx) = &mut self.stream_rx {
             // Try to receive events without blocking
             while let Ok(event) = rx.try_recv() {
-                match event {
-                    StreamEvent::TextDelta(text) => {
-                        self.streaming_text.push_str(&text);
-                        // Update the last assistant message with streaming content
-                        if let Some(last) = self.messages.last_mut() {
-                            if last.role == "assistant" {
-                                last.content = vec![ContentBlock::text(self.streaming_text.clone())];
-                            }
+                events_to_process.push(event);
+            }
+        }
+
+        // Process collected events
+        for event in events_to_process {
+            match event {
+                StreamEvent::TextDelta(text) => {
+                    self.streaming_text.push_str(&text);
+                    // Update the last assistant message with streaming content
+                    if let Some(last) = self.messages.last_mut() {
+                        if last.role == "assistant" {
+                            last.content = vec![ContentBlock::text(self.streaming_text.clone())];
                         }
-                    }
-                    StreamEvent::Done => {
-                        // Finalize the streaming message
-                        if let Some(last) = self.messages.last_mut() {
-                            if last.role == "assistant" {
-                                last.content = vec![ContentBlock::text(self.streaming_text.clone())];
-                            }
-                        }
-                        self.is_streaming = false;
-                        self.is_loading = false;
-                        self.stream_rx = None;
-                        self.streaming_text.clear();
-                        return false;
-                    }
-                    StreamEvent::Error(e) => {
-                        // Replace streaming message with error
-                        if let Some(last) = self.messages.last_mut() {
-                            if last.role == "assistant" {
-                                last.content = vec![ContentBlock::text(format!("Error: {}", e))];
-                            }
-                        }
-                        self.is_streaming = false;
-                        self.is_loading = false;
-                        self.stream_rx = None;
-                        self.streaming_text.clear();
-                        return false;
-                    }
-                    // Tool call events - for now, just append info text
-                    StreamEvent::ToolCallStart { id, name } => {
-                        self.streaming_text.push_str(&format!("\n[Tool: {} ({})]\n", name, id));
-                    }
-                    StreamEvent::ToolCallDelta { id: _, arguments } => {
-                        self.streaming_text.push_str(&arguments);
                     }
                 }
+                StreamEvent::Done => {
+                    // Finalize the streaming message
+                    if let Some(last) = self.messages.last_mut() {
+                        if last.role == "assistant" {
+                            last.content = vec![ContentBlock::text(self.streaming_text.clone())];
+                        }
+                    }
+                    self.is_streaming = false;
+                    self.is_loading = false;
+                    self.stream_rx = None;
+                    self.streaming_text.clear();
+                    // Stop progress
+                    self.progress_manager.stop_main();
+                    self.progress_manager.clear_completed();
+                    return false;
+                }
+                StreamEvent::Error(e) => {
+                    // Replace streaming message with error
+                    if let Some(last) = self.messages.last_mut() {
+                        if last.role == "assistant" {
+                            last.content = vec![ContentBlock::text(format!("Error: {}", e))];
+                        }
+                    }
+                    self.is_streaming = false;
+                    self.is_loading = false;
+                    self.stream_rx = None;
+                    self.streaming_text.clear();
+                    // Stop progress
+                    self.progress_manager.stop_main();
+                    self.progress_manager.clear_completed();
+                    return false;
+                }
+                // Tool call events - update progress manager
+                StreamEvent::ToolCallStart { id, name } => {
+                    // Start tracking this tool execution
+                    self.start_tool(id.clone(), name.clone(), format!("Executing {}...", name));
+                    self.streaming_text.push_str(&format!("\n[Tool: {} ({})]\n", name, id));
+                }
+                StreamEvent::ToolCallDelta { id: _, arguments } => {
+                    self.streaming_text.push_str(&arguments);
+                }
+                StreamEvent::ToolCallComplete { id: _, name, arguments } => {
+                    // Mark tool as ready for execution
+                    // The tool will actually execute in the agent loop
+                    // For now, we just note that arguments are complete
+                    self.streaming_text.push_str(&format!("\n[Tool {} ready: {} bytes]\n", name, arguments.len()));
+                }
             }
-            return true; // Still streaming
+            still_streaming = true;
         }
-        false
+
+        still_streaming
+    }
+
+    /// Start tracking a tool execution
+    pub fn start_tool(&mut self, tool_id: String, tool_name: String, description: String) {
+        let idx = self.progress_manager.add_tool(tool_name, description);
+        self.tool_progress_map.insert(tool_id, idx);
+        self.progress_manager.update_tool_status(idx, ToolStatus::Executing);
+    }
+
+    /// Update tool execution status
+    pub fn update_tool_status(&mut self, tool_id: &str, status: ToolStatus) {
+        if let Some(idx) = self.tool_progress_map.get(tool_id) {
+            self.progress_manager.update_tool_status(*idx, status);
+        }
+    }
+
+    /// Complete tool execution with result
+    pub fn complete_tool(&mut self, tool_id: &str, success: bool, _result_summary: String) {
+        if let Some(idx) = self.tool_progress_map.get(tool_id) {
+            let status = if success {
+                ToolStatus::Success
+            } else {
+                ToolStatus::Error
+            };
+            self.progress_manager.update_tool_status(*idx, status);
+
+            // Update description with result summary
+            // Note: ProgressManager doesn't have a method to update description
+            // We could add one, or just leave the original description
+
+            // Remove from active tracking after a delay (via clear_completed)
+        }
+    }
+
+    /// Clear all completed tool progresses
+    pub fn clear_completed_tools(&mut self) {
+        self.progress_manager.clear_completed();
+        // Clear mapping for completed tools
+        // Note: we'd need to track which tools are completed, but for simplicity
+        // we just clear all mapping when progress_manager clears
+        self.tool_progress_map.clear();
+    }
+
+    /// Get tool progress count
+    pub fn tool_progress_count(&self) -> usize {
+        self.progress_manager.active_tool_count()
     }
 }
 

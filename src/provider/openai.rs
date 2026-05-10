@@ -338,6 +338,8 @@ impl OpenAIProvider {
                 // True streaming using bytes_stream()
                 let mut stream = resp.bytes_stream();
                 let mut buffer = String::new();
+                // Track tool call arguments accumulation
+                let mut tool_call_args: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
 
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
@@ -357,6 +359,14 @@ impl OpenAIProvider {
                                 // Parse SSE data line
                                 if let Some(data) = sse::parse_data_line(line) {
                                     if sse::is_done(data) {
+                                        // Send ToolCallComplete for all accumulated tool calls
+                                        for (id, (name, args)) in &tool_call_args {
+                                            tx.send(StreamEvent::ToolCallComplete {
+                                                id: id.clone(),
+                                                name: name.clone(),
+                                                arguments: args.clone(),
+                                            }).await.ok();
+                                        }
                                         tx.send(StreamEvent::Done).await.ok();
                                         return;
                                     }
@@ -382,6 +392,8 @@ impl OpenAIProvider {
                                                                 id: tc.id.clone(),
                                                                 name: name.clone(),
                                                             }).await.ok();
+                                                            // Initialize tool call tracking
+                                                            tool_call_args.insert(tc.id.clone(), (name.clone(), String::new()));
                                                         }
                                                         if let Some(args) = &function.arguments {
                                                             if !args.is_empty() {
@@ -389,6 +401,10 @@ impl OpenAIProvider {
                                                                     id: tc.id.clone(),
                                                                     arguments: args.clone(),
                                                                 }).await.ok();
+                                                                // Accumulate arguments
+                                                                if let Some((_, accumulated)) = tool_call_args.get_mut(&tc.id) {
+                                                                    accumulated.push_str(args);
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -407,6 +423,14 @@ impl OpenAIProvider {
                 }
 
                 // Stream ended without explicit [DONE]
+                // Send ToolCallComplete for all accumulated tool calls
+                for (id, (name, args)) in &tool_call_args {
+                    tx.send(StreamEvent::ToolCallComplete {
+                        id: id.clone(),
+                        name: name.clone(),
+                        arguments: args.clone(),
+                    }).await.ok();
+                }
                 tx.send(StreamEvent::Done).await.ok();
             }
             Err(e) => {

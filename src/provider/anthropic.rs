@@ -432,6 +432,9 @@ impl AnthropicProvider {
                 // Anthropic uses SSE format
                 let mut stream = resp.bytes_stream();
                 let mut buffer = String::new();
+                // Track tool call arguments accumulation
+                let mut tool_call_args: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+                let mut current_tool_id: Option<String> = None;
 
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
@@ -466,22 +469,52 @@ impl AnthropicProvider {
                                                     }
                                                     AnthropicStreamDelta::InputJsonDelta { partial_json } => {
                                                         // Tool arguments delta
-                                                        tx.send(StreamEvent::ToolCallDelta {
-                                                            id: "unknown".to_string(),
-                                                            arguments: partial_json,
-                                                        }).await.ok();
+                                                        if let Some(id) = &current_tool_id {
+                                                            tx.send(StreamEvent::ToolCallDelta {
+                                                                id: id.clone(),
+                                                                arguments: partial_json.clone(),
+                                                            }).await.ok();
+                                                            // Accumulate arguments
+                                                            if let Some((_, accumulated)) = tool_call_args.get_mut(id) {
+                                                                accumulated.push_str(&partial_json);
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                             AnthropicStreamEvent::ContentBlockStart { index: _, content_block } => {
                                                 match content_block {
                                                     AnthropicStreamContentBlock::ToolUse { id, name } => {
-                                                        tx.send(StreamEvent::ToolCallStart { id, name }).await.ok();
+                                                        tx.send(StreamEvent::ToolCallStart { id: id.clone(), name: name.clone() }).await.ok();
+                                                        // Initialize tool call tracking
+                                                        tool_call_args.insert(id.clone(), (name.clone(), String::new()));
+                                                        current_tool_id = Some(id);
                                                     }
                                                     _ => {}
                                                 }
                                             }
+                                            AnthropicStreamEvent::ContentBlockStop { index: _ } => {
+                                                // Tool call complete for current block
+                                                if let Some(id) = &current_tool_id {
+                                                    if let Some((name, args)) = tool_call_args.get(id) {
+                                                        tx.send(StreamEvent::ToolCallComplete {
+                                                            id: id.clone(),
+                                                            name: name.clone(),
+                                                            arguments: args.clone(),
+                                                        }).await.ok();
+                                                    }
+                                                }
+                                                current_tool_id = None;
+                                            }
                                             AnthropicStreamEvent::MessageStop => {
+                                                // Send ToolCallComplete for any remaining tool calls
+                                                for (id, (name, args)) in &tool_call_args {
+                                                    tx.send(StreamEvent::ToolCallComplete {
+                                                        id: id.clone(),
+                                                        name: name.clone(),
+                                                        arguments: args.clone(),
+                                                    }).await.ok();
+                                                }
                                                 tx.send(StreamEvent::Done).await.ok();
                                                 return;
                                             }

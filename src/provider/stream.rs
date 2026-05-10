@@ -19,6 +19,12 @@ pub enum StreamEvent {
         id: String,
         arguments: String,
     },
+    /// Tool call completed (all arguments received)
+    ToolCallComplete {
+        id: String,
+        name: String,
+        arguments: String,
+    },
     /// Streaming finished
     Done,
     /// Error occurred
