@@ -3,6 +3,7 @@
 mod bash;
 mod file_edit;
 mod file_read;
+mod git;
 mod glob;
 mod grep;
 mod tool_trait;
@@ -12,6 +13,7 @@ mod write;
 pub use bash::BashTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
+pub use git::GitTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use web_fetch::WebFetchTool;
@@ -41,6 +43,7 @@ impl ToolRegistry {
         registry.register(Arc::new(FileReadTool::new()));
         registry.register(Arc::new(FileEditTool::new()));
         registry.register(Arc::new(WriteTool::new()));
+        registry.register(Arc::new(GitTool::new()));
         registry.register(Arc::new(GlobTool::new()));
         registry.register(Arc::new(GrepTool::new()));
         registry.register(Arc::new(WebFetchTool::new()));
