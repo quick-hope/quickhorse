@@ -330,6 +330,7 @@ impl OpenAIProvider {
             .post(&base_url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
+            .header("User-Agent", "quickhorse/0.1.0")
             .json(&request)
             .send()
             .await;
@@ -386,6 +387,14 @@ impl OpenAIProvider {
                                         if let Some(choice) = stream_resp.choices.first() {
                                             // Text delta
                                             if let Some(delta) = &choice.delta {
+                                                // Handle reasoning_content (for reasoning models like qwen3.6-plus)
+                                                // The reasoning/thinking content is emitted as TextDelta
+                                                if let Some(reasoning) = &delta.reasoning_content {
+                                                    if !reasoning.is_empty() {
+                                                        tx.send(StreamEvent::TextDelta(reasoning.clone())).await.ok();
+                                                    }
+                                                }
+                                                // Handle content (actual response)
                                                 if let Some(content) = &delta.content {
                                                     if !content.is_empty() {
                                                         tx.send(StreamEvent::TextDelta(content.clone())).await.ok();
@@ -473,6 +482,9 @@ struct StreamChoice {
 #[derive(Deserialize)]
 struct Delta {
     content: Option<String>,
+    /// Reasoning content for models like qwen3.6-plus (thinking process)
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Deserialize)]

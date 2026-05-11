@@ -1,8 +1,17 @@
 //! Agent module - core agent logic with tool call loop
 
+mod context;
+
+pub use context::{
+    estimate_tokens, estimate_message_tokens, estimate_total_tokens,
+    compress_messages, compress_tool_results, needs_compression,
+    compression_stats, CompressionStats, DEFAULT_MAX_TOKENS,
+};
+
 use crate::permissions::{PermissionMode, PermissionResult};
 use crate::provider::{ContentBlock, Message, Provider};
 use crate::tools::{Tool, ToolContext, ToolRegistry, ToolResult};
+use futures::future::join_all;
 use std::sync::{Arc, RwLock};
 use std::error::Error;
 
@@ -209,27 +218,42 @@ impl Agent {
                 return Ok(response.text_content());
             }
 
-            // Execute tools sequentially and collect results
-            let mut tool_results: Vec<ContentBlock> = Vec::new();
-            for block in tool_uses.iter() {
-                if let ContentBlock::ToolUse { id, name, input } = block {
-                    let result = self.execute_tool(id.clone(), name.clone(), input.clone()).await;
-                    tool_results.push(result);
-                } else {
-                    tool_results.push(ContentBlock::tool_result(
-                        "unknown".to_string(),
-                        "Invalid tool call".to_string(),
-                        true,
-                    ));
-                }
-            }
+            // Execute tools in parallel (independent tools can run concurrently)
+            let tool_results = self.execute_tools_parallel(tool_uses).await;
 
             // Add tool results as user message
             self.messages.push(Message::user_with_tool_results(tool_results));
         }
     }
 
-    /// Execute a single tool with permission checking
+    /// Execute multiple tools in parallel
+    async fn execute_tools_parallel(&self, tool_uses: Vec<&ContentBlock>) -> Vec<ContentBlock> {
+        // Collect tool execution futures
+        let futures: Vec<_> = tool_uses
+            .into_iter()
+            .filter_map(|block| {
+                if let ContentBlock::ToolUse { id, name, input } = block {
+                    // Clone necessary data for async execution
+                    let tool_id = id.clone();
+                    let tool_name = name.clone();
+                    let tool_input = input.clone();
+                    let tools = self.tools.clone();
+                    let permission_mode = self.config.permission_mode;
+
+                    Some(async move {
+                        execute_tool_async(tool_id, tool_name, tool_input, tools, permission_mode).await
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Execute all tools concurrently
+        join_all(futures).await
+    }
+
+    /// Execute a single tool with permission checking (for sequential execution)
     async fn execute_tool(&mut self, tool_id: String, name: String, input: serde_json::Value) -> ContentBlock {
         // Get tool from registry
         let tool = self.tools.get(&name);
@@ -310,6 +334,72 @@ impl Agent {
             Err(e) => {
                 ContentBlock::tool_result(tool_id, format!("Error: {}", e), true)
             }
+        }
+    }
+}
+
+/// Execute a tool asynchronously (for parallel execution)
+async fn execute_tool_async(
+    tool_id: String,
+    name: String,
+    input: serde_json::Value,
+    tools: ToolRegistry,
+    permission_mode: PermissionMode,
+) -> ContentBlock {
+    // Get tool from registry
+    let tool = tools.get(&name);
+
+    if tool.is_none() {
+        return ContentBlock::tool_result(
+            tool_id,
+            format!("Tool '{}' not found", name),
+            true,
+        );
+    }
+
+    let tool = tool.unwrap();
+
+    // Check permissions first
+    let perm_result = tool.check_permissions(&input);
+
+    // Handle permission result
+    if perm_result.is_denied() {
+        return ContentBlock::tool_result(
+            tool_id,
+            format!("Permission denied: {}", perm_result.message),
+            true,
+        );
+    }
+
+    // For parallel execution, we skip confirmation requests
+    // (parallel execution assumes tools are pre-approved or in bypass mode)
+    if perm_result.needs_confirmation() && permission_mode == PermissionMode::Default {
+        return ContentBlock::tool_result(
+            tool_id,
+            format!("Permission required (parallel mode): {}", perm_result.message),
+            true,
+        );
+    }
+
+    // Create context
+    let context = ToolContext {
+        cwd: std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+            .to_string_lossy()
+            .to_string(),
+        abort_signal: None,
+        permission_mode: permission_mode,
+    };
+
+    // Execute tool
+    let result = tool.call(input, &context).await;
+
+    match result {
+        Ok(ToolResult { content, is_error }) => {
+            ContentBlock::tool_result(tool_id, content, is_error)
+        }
+        Err(e) => {
+            ContentBlock::tool_result(tool_id, format!("Error: {}", e), true)
         }
     }
 }

@@ -309,11 +309,19 @@ impl PathCompleter {
     /// Find the start position of a path-like token in input
     pub fn find_path_start(&self, input: &str, cursor_pos: usize) -> Option<usize> {
         // Look backwards from cursor to find path prefix
-        let text_up_to_cursor = if cursor_pos <= input.len() {
-            &input[..cursor_pos]
+        // Ensure cursor_pos is at a valid UTF-8 boundary
+        let safe_cursor_pos = if cursor_pos <= input.len() && input.is_char_boundary(cursor_pos) {
+            cursor_pos
         } else {
-            input
+            // Find the nearest valid boundary before cursor_pos
+            let mut pos = cursor_pos.min(input.len());
+            while pos > 0 && !input.is_char_boundary(pos) {
+                pos -= 1;
+            }
+            pos
         };
+
+        let text_up_to_cursor = &input[..safe_cursor_pos];
 
         // Find the last occurrence of path-like prefixes
         // Look for ~/ at start, or /, ./, ../ anywhere
@@ -324,29 +332,38 @@ impl PathCompleter {
         }
 
         // Look for /, ./, ../ in the last part of input
-        // Scan backwards to find path start
-        let mut pos = cursor_pos;
+        // Use char_indices to properly handle UTF-8 boundaries
+        let char_indices: Vec<(usize, char)> = text_up_to_cursor.char_indices().collect();
 
         // Find the start of the current "word" (after last space or at beginning)
-        while pos > 0 {
-            let prev_char = input[pos - 1..pos].chars().next();
-            if let Some(c) = prev_char {
-                if c == ' ' || c == '\n' || c == '\t' {
-                    break;
+        // Iterate backwards through character indices
+        let mut word_start_idx = 0;
+        for i in (0..char_indices.len()).rev() {
+            let (byte_pos, c) = char_indices[i];
+            if c == ' ' || c == '\n' || c == '\t' {
+                // Word starts after this whitespace
+                if i + 1 < char_indices.len() {
+                    word_start_idx = char_indices[i + 1].0;
+                } else {
+                    word_start_idx = byte_pos + c.len_utf8();
                 }
+                break;
             }
-            pos -= 1;
+            if i == 0 {
+                word_start_idx = 0;
+            }
         }
 
         // Check if this word starts with a path prefix
-        let word = &input[pos..cursor_pos.min(input.len())];
+        let word_end = safe_cursor_pos.min(input.len());
+        let word = &input[word_start_idx..word_end];
 
         if word.starts_with("/")
             || word.starts_with("./")
             || word.starts_with("../")
             || word.starts_with("~")
         {
-            Some(pos)
+            Some(word_start_idx)
         } else {
             None
         }
@@ -531,5 +548,44 @@ mod tests {
         // Not path-like
         assert!(!completer.can_complete("hello", 5));
         assert!(!completer.can_complete("", 0));
+    }
+
+    #[test]
+    fn test_find_path_start_with_chinese() {
+        let completer = PathCompleter::new();
+
+        // Chinese characters before path (UTF-8 multi-byte)
+        // "您好 ~/test" - 您好 is 6 bytes (2 chars * 3 bytes each), space is 1 byte
+        // Byte positions: 您(0-2), 好(3-5), space(6), ~(7), /test(8-12)
+        let input = "您好 ~/test";
+        // Cursor at position 9 (after "您好 ")
+        assert_eq!(completer.find_path_start(input, 9), Some(7));
+
+        // "你好 /path" - 你好 is 6 bytes, space is 1 byte
+        // Byte positions: 你(0-2), 好(3-5), space(6), /(7), path(8-11)
+        let input2 = "你好 /path";
+        assert_eq!(completer.find_path_start(input2, 8), Some(7));
+
+        // Chinese only, no path - should return None
+        let input3 = "您好您好";
+        // '您' is 3 bytes, cursor at byte 3 (end of first char)
+        // This should NOT panic
+        let result = completer.find_path_start(input3, 3);
+        assert_eq!(result, None);
+
+        // Test all valid UTF-8 boundary positions (should not panic)
+        let input4 = "您好世界";
+        // Valid boundaries: 0, 3, 6, 9, 12 (each Chinese char is 3 bytes)
+        for pos in [0, 3, 6, 9, 12] {
+            // Should not panic at valid boundary positions
+            let _ = completer.find_path_start(input4, pos);
+        }
+
+        // Test invalid boundary positions (inside multi-byte chars)
+        // Should handle gracefully without panic
+        for pos in 1..=input4.len() {
+            // Should not panic even at invalid byte positions
+            let _ = completer.find_path_start(input4, pos);
+        }
     }
 }

@@ -1,21 +1,25 @@
 //! Tools module - tool implementations for the coding agent
 
 mod bash;
+mod execute;
 mod file_edit;
 mod file_read;
 mod git;
 mod glob;
 mod grep;
+mod patch;
 mod tool_trait;
 mod web_fetch;
 mod write;
 
 pub use bash::BashTool;
+pub use execute::ExecuteTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use git::GitTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
+pub use patch::PatchTool;
 pub use web_fetch::WebFetchTool;
 pub use write::WriteTool;
 pub use tool_trait::{Tool, ToolContext, ToolResult, build_schema};
@@ -24,6 +28,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Registry of all available tools
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }
@@ -43,6 +48,8 @@ impl ToolRegistry {
         registry.register(Arc::new(FileReadTool::new()));
         registry.register(Arc::new(FileEditTool::new()));
         registry.register(Arc::new(WriteTool::new()));
+        registry.register(Arc::new(PatchTool::new()));
+        registry.register(Arc::new(ExecuteTool::new()));
         registry.register(Arc::new(GitTool::new()));
         registry.register(Arc::new(GlobTool::new()));
         registry.register(Arc::new(GrepTool::new()));
