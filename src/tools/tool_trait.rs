@@ -1,5 +1,6 @@
 //! Tool trait definition - core interface for all tools
 
+use crate::permissions::PermissionResult as PermResult;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,8 @@ pub struct ToolContext {
     pub cwd: String,
     /// Abort signal
     pub abort_signal: Option<std::sync::Arc<tokio::sync::Notify>>,
+    /// Permission mode
+    pub permission_mode: crate::permissions::PermissionMode,
 }
 
 impl Default for ToolContext {
@@ -22,6 +25,7 @@ impl Default for ToolContext {
                 .to_string_lossy()
                 .to_string(),
             abort_signal: None,
+            permission_mode: crate::permissions::PermissionMode::Default,
         }
     }
 }
@@ -47,17 +51,8 @@ impl ToolResult {
     }
 }
 
-/// Permission check result
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum PermissionResult {
-    /// Allow the tool to run
-    Allow,
-    /// Deny with a reason
-    Deny(String),
-    /// Ask user for permission
-    Ask(String),
-}
+/// Permission check result (alias to permissions module)
+pub type PermissionResult = PermResult;
 
 /// Core trait for all tools
 #[async_trait]
@@ -86,7 +81,7 @@ pub trait Tool: Send + Sync {
     #[allow(dead_code)]
     fn check_permissions(&self, _input: &serde_json::Value) -> PermissionResult {
         // Default: allow (implementations can override for security)
-        PermissionResult::Allow
+        PermissionResult::allow("Default permission check")
     }
 
     /// Get a summary of the tool call for display

@@ -7,13 +7,13 @@
 //! - Error handling in agent loop
 
 use quickhorse::agent::{Agent, AgentConfig};
-use quickhorse::provider::{Provider, Message};
+use quickhorse::permissions::PermissionMode;
+use quickhorse::provider::{Message};
 use quickhorse::test_utils::{
     MockProvider, simple_mock_provider, mock_provider_with_responses,
     create_test_messages,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 // ============================================================================
 // Agent Creation Tests
@@ -35,6 +35,7 @@ fn test_agent_with_custom_config() {
     let config = AgentConfig {
         max_iterations: 5,
         system_prompt: "Custom prompt".to_string(),
+        permission_mode: PermissionMode::Default,
     };
 
     let agent = Agent::new(provider, config);
@@ -143,6 +144,7 @@ async fn test_agent_with_tools() {
     let config = AgentConfig {
         max_iterations: 5,
         system_prompt: system_prompt.clone(),
+        permission_mode: PermissionMode::BypassPermissions,
     };
     let mut agent = Agent::new(provider, config);
 
@@ -167,6 +169,7 @@ async fn test_agent_max_iterations() {
     let config = AgentConfig {
         max_iterations: 3,
         system_prompt: "Test".to_string(),
+        permission_mode: PermissionMode::Default,
     };
     let mut agent = Agent::new(provider, config);
 
@@ -187,6 +190,7 @@ fn test_agent_config_default() {
 
     assert!(config.max_iterations > 0);
     assert!(!config.system_prompt.is_empty());
+    assert_eq!(config.permission_mode, PermissionMode::Default);
 }
 
 #[test]
@@ -194,10 +198,12 @@ fn test_agent_config_custom() {
     let config = AgentConfig {
         max_iterations: 100,
         system_prompt: "Custom system prompt for testing".to_string(),
+        permission_mode: PermissionMode::AcceptEdits,
     };
 
     assert_eq!(config.max_iterations, 100);
     assert!(config.system_prompt.contains("Custom"));
+    assert_eq!(config.permission_mode, PermissionMode::AcceptEdits);
 }
 
 // ============================================================================

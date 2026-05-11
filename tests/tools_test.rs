@@ -38,8 +38,9 @@ async fn test_bash_tool_blocked_command() {
 
     assert!(result.is_ok());
     let tool_result = result.unwrap();
+    // System commands like rm -rf / are now denied by permission checker
     assert!(tool_result.is_error);
-    assert!(tool_result.content.contains("blocked"));
+    assert!(tool_result.content.contains("Permission denied") || tool_result.content.contains("blocked"));
 }
 
 #[tokio::test]

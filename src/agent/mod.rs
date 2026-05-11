@@ -1,5 +1,6 @@
 //! Agent module - core agent logic with tool call loop
 
+use crate::permissions::{PermissionMode, PermissionResult};
 use crate::provider::{ContentBlock, Message, Provider};
 use crate::tools::{Tool, ToolContext, ToolRegistry, ToolResult};
 use std::sync::{Arc, RwLock};
@@ -11,6 +12,8 @@ pub struct AgentConfig {
     pub max_iterations: usize,
     /// System prompt
     pub system_prompt: String,
+    /// Permission mode
+    pub permission_mode: PermissionMode,
 }
 
 impl Default for AgentConfig {
@@ -18,8 +21,29 @@ impl Default for AgentConfig {
         Self {
             max_iterations: 10,
             system_prompt: "You are QuickHorse, a CLI coding agent. You have access to tools for executing commands, reading files, and more. Use tools when appropriate to help the user with their requests.".to_string(),
+            permission_mode: PermissionMode::Default,
         }
     }
+}
+
+/// Permission check result from tool execution
+#[derive(Debug, Clone)]
+pub enum ToolPermissionStatus {
+    /// Tool executed successfully
+    Executed(ToolResult),
+    /// Permission denied
+    Denied(String),
+    /// Permission needs user confirmation
+    NeedsConfirmation {
+        /// Tool name
+        tool_name: String,
+        /// Tool ID
+        tool_id: String,
+        /// Input that needs confirmation
+        input: serde_json::Value,
+        /// Permission request message
+        message: String,
+    },
 }
 
 /// Agent that manages conversation with tools
@@ -32,6 +56,21 @@ pub struct Agent {
     config: AgentConfig,
     /// Conversation history
     messages: Vec<Message>,
+    /// Pending permission request
+    pending_permission: Option<PendingPermission>,
+}
+
+/// Pending permission request waiting for user confirmation
+#[derive(Debug, Clone)]
+pub struct PendingPermission {
+    /// Tool name
+    pub tool_name: String,
+    /// Tool ID
+    pub tool_id: String,
+    /// Input that needs confirmation
+    pub input: serde_json::Value,
+    /// Permission request message
+    pub message: String,
 }
 
 impl Agent {
@@ -42,6 +81,58 @@ impl Agent {
             tools: ToolRegistry::with_default_tools(),
             config,
             messages: Vec::new(),
+            pending_permission: None,
+        }
+    }
+
+    /// Set permission mode
+    pub fn set_permission_mode(&mut self, mode: PermissionMode) {
+        self.config.permission_mode = mode;
+    }
+
+    /// Get current permission mode
+    pub fn permission_mode(&self) -> PermissionMode {
+        self.config.permission_mode
+    }
+
+    /// Check if there's a pending permission request
+    pub fn has_pending_permission(&self) -> bool {
+        self.pending_permission.is_some()
+    }
+
+    /// Get pending permission request
+    pub fn pending_permission(&self) -> Option<&PendingPermission> {
+        self.pending_permission.as_ref()
+    }
+
+    /// Approve pending permission and execute tool
+    pub async fn approve_permission(&mut self) -> Result<ToolResult, Box<dyn Error + Send + Sync>> {
+        if let Some(pending) = self.pending_permission.take() {
+            let tool = self.tools.get(&pending.tool_name);
+            if let Some(tool) = tool {
+                let context = ToolContext {
+                    cwd: std::env::current_dir()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+                        .to_string_lossy()
+                        .to_string(),
+                    abort_signal: None,
+                    permission_mode: PermissionMode::BypassPermissions,
+                };
+                tool.call(pending.input, &context).await
+            } else {
+                Err(format!("Tool '{}' not found", pending.tool_name).into())
+            }
+        } else {
+            Err("No pending permission request".into())
+        }
+    }
+
+    /// Deny pending permission
+    pub fn deny_permission(&mut self) -> String {
+        if let Some(pending) = self.pending_permission.take() {
+            format!("Permission denied for: {}", pending.message)
+        } else {
+            "No pending permission request".to_string()
         }
     }
 
@@ -138,8 +229,8 @@ impl Agent {
         }
     }
 
-    /// Execute a single tool
-    async fn execute_tool(&self, tool_id: String, name: String, input: serde_json::Value) -> ContentBlock {
+    /// Execute a single tool with permission checking
+    async fn execute_tool(&mut self, tool_id: String, name: String, input: serde_json::Value) -> ContentBlock {
         // Get tool from registry
         let tool = self.tools.get(&name);
 
@@ -152,13 +243,68 @@ impl Agent {
         }
 
         let tool = tool.unwrap();
-        let context = ToolContext::default();
+
+        // Check permissions first
+        let perm_result = tool.check_permissions(&input);
+
+        // Handle permission result based on mode
+        if perm_result.is_denied() {
+            return ContentBlock::tool_result(
+                tool_id,
+                format!("Permission denied: {}", perm_result.message),
+                true,
+            );
+        }
+
+        // If needs confirmation and mode is Default, store pending permission
+        if perm_result.needs_confirmation() && self.config.permission_mode == PermissionMode::Default {
+            // Store pending permission and return special result
+            self.pending_permission = Some(PendingPermission {
+                tool_name: name.clone(),
+                tool_id: tool_id.clone(),
+                input: input.clone(),
+                message: perm_result.message.clone(),
+            });
+
+            // Return a special marker that TUI can detect
+            return ContentBlock::tool_result(
+                tool_id,
+                format!("PERMISSION_ASK: {}", perm_result.message),
+                false, // Not an error, just needs confirmation
+            );
+        }
+
+        // Create context with permission mode
+        let context = ToolContext {
+            cwd: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+                .to_string_lossy()
+                .to_string(),
+            abort_signal: None,
+            permission_mode: self.config.permission_mode,
+        };
 
         // Execute tool
         let result = tool.call(input.clone(), &context).await;
 
         match result {
             Ok(ToolResult { content, is_error }) => {
+                // Check if result contains permission request marker
+                if content.starts_with("PERMISSION_REQUEST:") {
+                    // Extract message and store pending permission
+                    let message = content.replace("PERMISSION_REQUEST: ", "");
+                    self.pending_permission = Some(PendingPermission {
+                        tool_name: name.clone(),
+                        tool_id: tool_id.clone(),
+                        input,
+                        message: message.clone(),
+                    });
+                    return ContentBlock::tool_result(
+                        tool_id,
+                        format!("PERMISSION_ASK: {}", message),
+                        false,
+                    );
+                }
                 ContentBlock::tool_result(tool_id, content, is_error)
             }
             Err(e) => {

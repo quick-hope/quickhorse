@@ -1,12 +1,15 @@
 //! UI rendering for TUI
 
+use crate::permissions::PermissionResult;
 use crate::provider::{ContentBlock, Message};
 use crate::tui::app::App;
+use crate::tui::completion::CompletionType;
+use crate::tui::permission_dialog::PermissionDialog;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Clear},
     Frame,
 };
 
@@ -23,6 +26,13 @@ pub fn render(f: &mut Frame, app: &App) {
         let tool_count = app.progress_manager.active_tool_count();
         // 1 line for main spinner + 1 line per tool
         (1 + tool_count).min(5) as u16
+    } else {
+        0
+    };
+
+    // Completion popup height (when visible)
+    let completion_height: u16 = if app.completion_state.is_visible() {
+        (app.completion_state.count() + 2).min(10) as u16
     } else {
         0
     };
@@ -50,8 +60,25 @@ pub fn render(f: &mut Frame, app: &App) {
     // Render input area
     render_input(f, app, chunks[2]);
 
+    // Render completion popup (above input area)
+    if completion_height > 0 {
+        render_completion(f, app, chunks[2]);
+    }
+
     // Render status bar
     render_status(f, app, chunks[3]);
+
+    // Render permission dialog if pending
+    if let Some(permission) = &app.pending_permission {
+        if let Some(dialog) = &app.permission_dialog {
+            dialog.render(f);
+        } else {
+            // Render inline permission request if dialog not initialized
+            let result = PermissionResult::ask(&permission.message);
+            let temp_dialog = PermissionDialog::new(permission.message.clone(), result);
+            temp_dialog.render(f);
+        }
+    }
 }
 
 fn render_messages(f: &mut Frame, app: &App, area: Rect) {
@@ -246,4 +273,86 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
 
     let status_widget = Paragraph::new(status_text);
     f.render_widget(status_widget, area);
+}
+
+/// Render completion popup above input area
+fn render_completion(f: &mut Frame, app: &App, input_area: Rect) {
+    if !app.completion_state.is_visible() {
+        return;
+    }
+
+    let suggestions = app.completion_state.suggestions();
+    let selected_idx = app.completion_state.selected_index();
+
+    // Calculate popup height
+    let popup_height = (suggestions.len() + 2).min(10) as u16;
+    let popup_width = 40_u16; // Fixed width for command completions
+
+    // Position popup above input area
+    let popup_y = input_area.y.saturating_sub(popup_height);
+    let popup_area = Rect {
+        x: input_area.x,
+        y: popup_y,
+        width: popup_width.min(input_area.width),
+        height: popup_height,
+    };
+
+    // Clear the area first
+    f.render_widget(Clear, popup_area);
+
+    // Build completion lines
+    let lines: Vec<Line> = suggestions
+        .iter()
+        .enumerate()
+        .map(|(i, suggestion)| {
+            let is_selected = i == selected_idx;
+
+            // Color based on completion type
+            let base_color = match suggestion.completion_type {
+                CompletionType::Command => Color::Cyan,
+                CompletionType::Path => Color::Yellow,
+                CompletionType::Provider => Color::Magenta,
+                CompletionType::Model => Color::Green,
+            };
+
+            let style = if is_selected {
+                Style::default()
+                    .fg(base_color)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+
+            let selected_marker = if is_selected { "▶ " } else { "  " };
+
+            let display_text = Span::styled(
+                format!("{}{}", selected_marker, suggestion.display_text),
+                style,
+            );
+
+            // Add description if available
+            if let Some(desc) = &suggestion.description {
+                let desc_text = Span::styled(
+                    format!(" - {}", desc),
+                    if is_selected {
+                        Style::default().fg(Color::DarkGray)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                );
+                Line::from(vec![display_text, desc_text])
+            } else {
+                Line::from(display_text)
+            }
+        })
+        .collect();
+
+    let block = Block::default()
+        .title(" Commands ")
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, popup_area);
 }

@@ -1,8 +1,12 @@
 //! Application state management with multiline text editor
 
+use crate::agent::PendingPermission;
 use crate::commands::{CommandRegistry, CommandContext};
 use crate::config::Config;
+use crate::permissions::{PermissionMode, PermissionUpdate, RuleBehavior, RuleSource, RuleValue};
 use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver};
+use crate::tui::completion::{CommandCompleter, CompletionProvider, CompletionState, PathCompleter};
+use crate::tui::permission_dialog::{PermissionChoice, PermissionDialog};
 use crate::tui::progress::{ProgressManager, ToolStatus};
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::collections::HashMap;
@@ -277,11 +281,42 @@ pub struct App {
     pub progress_manager: ProgressManager,
     /// Mapping from tool_id to progress manager index
     tool_progress_map: HashMap<String, usize>,
+    /// Pending permission request awaiting user confirmation
+    pub pending_permission: Option<PendingPermission>,
+    /// Permission dialog for user interaction
+    pub permission_dialog: Option<PermissionDialog>,
+    /// Permission mode
+    pub permission_mode: PermissionMode,
+    /// Pending permission updates to save (from AllowAndSave)
+    pub pending_permission_updates: Option<PermissionUpdate>,
+    /// Completion state for tab completion
+    pub completion_state: CompletionState,
+    /// Command completer
+    pub completer: CommandCompleter,
+    /// Path completer
+    pub path_completer: PathCompleter,
+}
+
+/// Result of permission choice selection
+pub struct PermissionChoiceResult {
+    /// The user's choice
+    pub choice: PermissionChoice,
+    /// Tool name that requested permission
+    pub tool_name: String,
+    /// Tool ID for tracking
+    pub tool_id: String,
+    /// Input that needs permission
+    pub input: serde_json::Value,
+    /// Permission request message
+    pub message: String,
+    /// Permission updates to save (for AllowAndSave)
+    pub updates: Option<PermissionUpdate>,
 }
 
 impl App {
     /// Create a new App instance
     pub fn new() -> Self {
+        let registry = Arc::new(CommandRegistry::new());
         Self {
             editor: TextEditor::new(),
             messages: Vec::new(),
@@ -298,12 +333,20 @@ impl App {
             last_ctrl_c_time: None,
             progress_manager: ProgressManager::new(),
             tool_progress_map: HashMap::new(),
+            pending_permission: None,
+            permission_dialog: None,
+            permission_mode: PermissionMode::Default,
+            pending_permission_updates: None,
+            completion_state: CompletionState::new(),
+            completer: CommandCompleter::new(registry),
+            path_completer: PathCompleter::new(),
         }
     }
 
     /// Create App with Provider
     pub fn with_provider(provider: Arc<RwLock<dyn Provider>>, config: Config) -> Self {
-        let ctx = CommandContext::new(provider, config);
+        let ctx = CommandContext::new(provider, config.clone());
+        let registry = Arc::new(CommandRegistry::new());
         Self {
             editor: TextEditor::new(),
             messages: Vec::new(),
@@ -320,9 +363,97 @@ impl App {
             last_ctrl_c_time: None,
             progress_manager: ProgressManager::new(),
             tool_progress_map: HashMap::new(),
+            pending_permission: None,
+            permission_dialog: None,
+            permission_mode: config.permissions.mode,
+            pending_permission_updates: None,
+            completion_state: CompletionState::new(),
+            completer: CommandCompleter::new(registry),
+            path_completer: PathCompleter::new(),
         }
     }
 
+    /// Check if there's a pending permission request
+    pub fn has_pending_permission(&self) -> bool {
+        self.pending_permission.is_some()
+    }
+
+    /// Set pending permission request and create dialog
+    pub fn set_pending_permission(&mut self, permission: PendingPermission) {
+        use crate::permissions::PermissionResult;
+
+        // Create permission dialog with the request
+        let result = PermissionResult::ask(&permission.message);
+        let dialog = PermissionDialog::new(permission.message.clone(), result);
+
+        self.status = "[?] Permission request - use ↑↓ to select, Enter to confirm".to_string();
+        self.pending_permission = Some(permission);
+        self.permission_dialog = Some(dialog);
+        self.pending_permission_updates = None;
+    }
+
+    /// Clear pending permission and dialog
+    pub fn clear_pending_permission(&mut self) {
+        self.pending_permission = None;
+        self.permission_dialog = None;
+        self.pending_permission_updates = None;
+        self.status = "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string();
+    }
+
+    /// Handle permission confirmation with full PermissionChoice support
+    pub fn handle_permission_choice(&mut self) -> Option<PermissionChoiceResult> {
+        if let Some(dialog) = &mut self.permission_dialog {
+            let choice = dialog.confirm();
+            let permission = self.pending_permission.take();
+
+            if let Some(permission) = permission {
+                let updates = if choice == PermissionChoice::AllowAndSave {
+                    // Generate permission update for saving
+                    Some(PermissionUpdate::AddRules {
+                        destination: RuleSource::UserSettings,
+                        rules: vec![RuleValue {
+                            tool_name: permission.tool_name.clone(),
+                            rule_content: None, // Will be filled by specific tool
+                        }],
+                        behavior: RuleBehavior::Allow,
+                    })
+                } else {
+                    None
+                };
+
+                let result = PermissionChoiceResult {
+                    choice,
+                    tool_name: permission.tool_name,
+                    tool_id: permission.tool_id,
+                    input: permission.input,
+                    message: permission.message,
+                    updates,
+                };
+
+                self.clear_pending_permission();
+                return Some(result);
+            }
+        }
+        None
+    }
+
+    /// Handle permission confirmation (legacy y/n method)
+    pub fn handle_permission_response(&mut self, approved: bool) -> Option<String> {
+        if let Some(permission) = self.pending_permission.take() {
+            if approved {
+                self.status = format!("Approved: {}", permission.tool_name);
+                Some(format!("Permission approved for: {}", permission.message))
+            } else {
+                self.status = format!("Denied: {}", permission.tool_name);
+                Some(format!("Permission denied for: {}", permission.message))
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl App {
     /// Handle a key event (always in input mode)
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         // Ctrl+C handling for exit
@@ -334,6 +465,80 @@ impl App {
         // Reset Ctrl+C count on any other key
         self.ctrl_c_count = 0;
         self.last_ctrl_c_time = None;
+
+        // Handle pending permission request with PermissionDialog
+        if self.has_pending_permission() {
+            if let Some(dialog) = &mut self.permission_dialog {
+                match key.code {
+                    KeyCode::Up => {
+                        dialog.select_up();
+                        self.status = format!("[?] Selected: {}",
+                            match dialog.selected_choice() {
+                                PermissionChoice::AllowOnce => "Allow (once)",
+                                PermissionChoice::AllowAndSave => "Allow & save rule",
+                                PermissionChoice::Deny => "Deny",
+                                PermissionChoice::Cancel => "Cancel",
+                            });
+                    }
+                    KeyCode::Down => {
+                        dialog.select_down();
+                        self.status = format!("[?] Selected: {}",
+                            match dialog.selected_choice() {
+                                PermissionChoice::AllowOnce => "Allow (once)",
+                                PermissionChoice::AllowAndSave => "Allow & save rule",
+                                PermissionChoice::Deny => "Deny",
+                                PermissionChoice::Cancel => "Cancel",
+                            });
+                    }
+                    KeyCode::Enter => {
+                        // Confirm selection
+                        if let Some(result) = self.handle_permission_choice() {
+                            let response = match result.choice {
+                                PermissionChoice::AllowOnce => {
+                                    format!("✓ Permission approved for: {}", result.message)
+                                }
+                                PermissionChoice::AllowAndSave => {
+                                    self.pending_permission_updates = result.updates;
+                                    format!("✓ Permission approved & rule will be saved for: {}", result.message)
+                                }
+                                PermissionChoice::Deny => {
+                                    format!("✗ Permission denied for: {}", result.message)
+                                }
+                                PermissionChoice::Cancel => {
+                                    "Permission request cancelled".to_string()
+                                }
+                            };
+                            self.messages.push(Message::assistant(response));
+                        }
+                    }
+                    KeyCode::Esc => {
+                        // Cancel permission request
+                        self.clear_pending_permission();
+                        self.messages.push(Message::assistant("Permission request cancelled".to_string()));
+                    }
+                    _ => {
+                        // Ignore other keys while permission is pending
+                    }
+                }
+            } else {
+                // Legacy y/n handling if dialog not initialized
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        if let Some(response) = self.handle_permission_response(true) {
+                            self.messages.push(Message::assistant(response));
+                        }
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                        if let Some(response) = self.handle_permission_response(false) {
+                            self.messages.push(Message::assistant(response));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+
         self.status = "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string();
 
         if self.is_loading {
@@ -363,9 +568,31 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Tab => {
+                // Handle completion navigation
+                if self.completion_state.is_visible() {
+                    self.completion_state.select_next();
+                } else {
+                    // Trigger completion if input starts with /
+                    let text = self.editor.text();
+                    let cursor_pos = self.get_cursor_byte_pos();
+                    if self.completer.can_complete(&text, cursor_pos) {
+                        let suggestions = self.completer.get_suggestions(&text, cursor_pos);
+                        self.completion_state.show(suggestions, &text);
+                    }
+                }
+            }
+            KeyCode::BackTab => {
+                // Shift+Tab - navigate backwards
+                if self.completion_state.is_visible() {
+                    self.completion_state.select_prev();
+                }
+            }
             KeyCode::Enter => {
-                // Ctrl+Enter or Alt+Enter = newline, plain Enter = send
-                if key.modifiers == KeyModifiers::CONTROL || key.modifiers == KeyModifiers::ALT {
+                // If completion is visible, accept selected suggestion
+                if self.completion_state.is_visible() {
+                    self.accept_completion();
+                } else if key.modifiers == KeyModifiers::CONTROL || key.modifiers == KeyModifiers::ALT {
                     self.editor.insert_newline();
                 } else if !self.editor.is_empty() {
                     self.send_message();
@@ -373,21 +600,34 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.editor.insert_char(c);
+                // Update completion suggestions
+                self.update_completion();
             }
             KeyCode::Backspace => {
                 self.editor.backspace();
+                // Update completion suggestions
+                self.update_completion();
             }
             KeyCode::Delete => {
                 self.editor.delete();
+                // Update completion suggestions
+                self.update_completion();
             }
             KeyCode::Left => {
                 self.editor.move_left();
+                // Hide completion when moving cursor
+                self.completion_state.hide();
             }
             KeyCode::Right => {
                 self.editor.move_right();
+                // Hide completion when moving cursor
+                self.completion_state.hide();
             }
             KeyCode::Up => {
-                if self.editor.cursor_row > 0 {
+                // If completion visible, navigate in it
+                if self.completion_state.is_visible() {
+                    self.completion_state.select_prev();
+                } else if self.editor.cursor_row > 0 {
                     self.editor.move_up();
                 } else {
                     // Scroll messages when at first line
@@ -397,7 +637,10 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                if self.editor.cursor_row + 1 < self.editor.lines().len() {
+                // If completion visible, navigate in it
+                if self.completion_state.is_visible() {
+                    self.completion_state.select_next();
+                } else if self.editor.cursor_row + 1 < self.editor.lines().len() {
                     self.editor.move_down();
                 } else {
                     // Scroll messages when at last line
@@ -406,9 +649,11 @@ impl App {
             }
             KeyCode::Home => {
                 self.editor.move_home();
+                self.completion_state.hide();
             }
             KeyCode::End => {
                 self.editor.move_end();
+                self.completion_state.hide();
             }
             KeyCode::PageUp => {
                 if self.scroll > 5 {
@@ -421,7 +666,12 @@ impl App {
                 self.scroll += 5;
             }
             KeyCode::Esc => {
-                self.editor.clear();
+                // If completion visible, hide it; otherwise clear input
+                if self.completion_state.is_visible() {
+                    self.completion_state.hide();
+                } else {
+                    self.editor.clear();
+                }
             }
             _ => {}
         }
@@ -491,6 +741,106 @@ impl App {
         } else {
             self.status = "Press Ctrl+C again within 2 seconds to quit.".to_string();
         }
+    }
+
+    /// Get cursor position as byte offset in full text
+    fn get_cursor_byte_pos(&self) -> usize {
+        let (row, col) = self.editor.cursor_position();
+        let lines = self.editor.lines();
+
+        // Calculate byte offset: sum of all lines before current + current line offset
+        let mut offset = 0;
+        for (i, line) in lines.iter().enumerate() {
+            if i < row {
+                offset += line.len() + 1; // +1 for newline
+            } else if i == row {
+                offset += col;
+            }
+        }
+        offset
+    }
+
+    /// Update completion suggestions based on current input
+    fn update_completion(&mut self) {
+        let text = self.editor.text();
+        let cursor_pos = self.get_cursor_byte_pos();
+
+        // Try command completer first (for slash commands)
+        if self.completer.can_complete(&text, cursor_pos) {
+            let suggestions = self.completer.get_suggestions(&text, cursor_pos);
+            if suggestions.is_empty() {
+                self.completion_state.hide();
+            } else {
+                // Keep selection if input hasn't changed much
+                let current_selected = if self.completion_state.input_changed(&text) {
+                    0
+                } else {
+                    self.completion_state.selected_index()
+                };
+                self.completion_state.show(suggestions, &text);
+                // Restore selection if possible
+                for _ in 0..current_selected.min(self.completion_state.count() - 1) {
+                    self.completion_state.select_next();
+                }
+            }
+        } else if self.path_completer.can_complete(&text, cursor_pos) {
+            // Try path completer (for file paths)
+            let suggestions = self.path_completer.get_suggestions(&text, cursor_pos);
+            if suggestions.is_empty() {
+                self.completion_state.hide();
+            } else {
+                let current_selected = if self.completion_state.input_changed(&text) {
+                    0
+                } else {
+                    self.completion_state.selected_index()
+                };
+                self.completion_state.show(suggestions, &text);
+                for _ in 0..current_selected.min(self.completion_state.count() - 1) {
+                    self.completion_state.select_next();
+                }
+            }
+        } else {
+            self.completion_state.hide();
+        }
+    }
+
+    /// Accept selected completion suggestion
+    fn accept_completion(&mut self) {
+        if let Some(suggestion) = self.completion_state.selected_suggestion() {
+            let text = self.editor.text();
+            let cursor_pos = self.get_cursor_byte_pos();
+
+            let completed_text = match suggestion.completion_type {
+                crate::tui::CompletionType::Command => {
+                    // For slash commands: replace the partial command name
+                    format!("/{}", suggestion.id)
+                }
+                crate::tui::CompletionType::Path => {
+                    // For paths: find where the path starts and replace with suggestion
+                    // The replace_suffix contains the full path to replace
+                    let path_start = self.path_completer.find_path_start(&text, cursor_pos);
+
+                    if let Some(start) = path_start {
+                        // Keep text before path, replace path portion
+                        let before_path = &text[..start];
+                        format!("{}{}", before_path, suggestion.replace_suffix)
+                    } else {
+                        // Fallback: use replace_suffix directly
+                        suggestion.replace_suffix.clone()
+                    }
+                }
+                _ => {
+                    // For other types (Provider, Model): use replace_suffix
+                    suggestion.replace_suffix.clone()
+                }
+            };
+
+            self.editor.clear();
+            for c in completed_text.chars() {
+                self.editor.insert_char(c);
+            }
+        }
+        self.completion_state.hide();
     }
 
     /// Add an assistant message

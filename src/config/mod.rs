@@ -3,6 +3,8 @@
 mod setup;
 
 pub use setup::SetupWizard;
+use crate::permissions::{PermissionConfig, PermissionUpdate, RuleBehavior, RuleSource, RuleValue};
+use crate::secure_storage::{get_secure_storage, SecureStorageData};
 
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -30,6 +32,9 @@ pub struct Config {
     /// Agent settings
     #[serde(default)]
     pub agent: AgentConfig,
+    /// Permission settings
+    #[serde(default)]
+    pub permissions: PermissionConfig,
 }
 
 impl Default for Config {
@@ -38,6 +43,7 @@ impl Default for Config {
             default_provider: "openai".to_string(),
             providers: Providers::default(),
             agent: AgentConfig::default(),
+            permissions: PermissionConfig::default(),
         }
     }
 }
@@ -73,15 +79,16 @@ impl Default for Providers {
 /// OpenAI configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIConfig {
-    /// API key (or use OPENAI_API_KEY env var)
-    #[serde(default)]
+    /// API key (stored in SecureStorage, not config file)
+    /// This field is for backwards compatibility but should not be serialized
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     /// Default model
     #[serde(default = "default_openai_model")]
     pub model: String,
     /// Custom base URL (or use OPENAI_BASE_URL env var)
     /// Useful for alternative OpenAI-compatible APIs like BaiLian, DeepSeek, etc.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 }
 
@@ -102,14 +109,14 @@ impl Default for OpenAIConfig {
 /// Anthropic configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnthropicConfig {
-    /// API key (or use ANTHROPIC_API_KEY env var)
-    #[serde(default)]
+    /// API key (stored in SecureStorage, not config file)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     /// Default model
     #[serde(default = "default_anthropic_model")]
     pub model: String,
     /// Custom base URL (for BaiLian Coding Plan, etc.)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 }
 
@@ -130,8 +137,8 @@ impl Default for AnthropicConfig {
 /// Gemini configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiConfig {
-    /// API key (or use GEMINI_API_KEY env var)
-    #[serde(default)]
+    /// API key (stored in SecureStorage, not config file)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     /// Default model
     #[serde(default = "default_gemini_model")]
@@ -251,8 +258,18 @@ impl Config {
         Ok(PathBuf::from(home).join(".quickhorse").join("config.toml"))
     }
 
-    /// Get API key for a provider (from config or env)
+    /// Get API key for a provider (from secure storage, config, or env)
+    /// Priority: SecureStorage > config file > env var
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
+        // Try secure storage first
+        let storage = get_secure_storage();
+        if let Ok(Some(data)) = storage.read() {
+            if let Some(key) = data.api_keys.get(provider) {
+                return Some(key.clone());
+            }
+        }
+
+        // Fall back to config file (deprecated, but still supported)
         match provider {
             "openai" => self.providers.openai.api_key.clone().or_else(|| {
                 env::var("OPENAI_API_KEY").ok()
@@ -330,14 +347,18 @@ impl Config {
         self.get_api_key(&self.default_provider).is_some()
     }
 
-    /// Set API key for a provider
+    /// Set API key for a provider (stores in secure storage only)
     pub fn set_api_key(&mut self, provider: &str, key: String) {
-        match provider {
-            "openai" => self.providers.openai.api_key = Some(key),
-            "anthropic" => self.providers.anthropic.api_key = Some(key),
-            "gemini" => self.providers.gemini.api_key = Some(key),
-            _ => {}
+        // Store in secure storage - no fallback to config file
+        let storage = get_secure_storage();
+        let mut data = storage.read().ok().flatten().unwrap_or_default();
+        data.api_keys.insert(provider.to_string(), key);
+        if let Err(e) = storage.write(&data) {
+            eprintln!("Error: Failed to store API key in secure storage: {}", e);
+            eprintln!("API key for {} was not saved. Please check secure storage availability.", provider);
         }
+        // Note: We intentionally do NOT store in config.api_key fields
+        // API keys must only be stored in SecureStorage
     }
 
     /// Set model for a provider
@@ -359,6 +380,97 @@ impl Config {
     /// Set default provider
     pub fn set_default_provider(&mut self, provider: String) {
         self.default_provider = provider;
+    }
+
+    /// Apply a permission update and save to config
+    pub fn apply_permission_update(&mut self, update: &PermissionUpdate) -> Result<(), ConfigError> {
+        match update {
+            PermissionUpdate::AddRules { destination, rules, behavior } => {
+                // Only support UserSettings destination for now
+                if *destination != RuleSource::UserSettings {
+                    return Ok(()); // Silently ignore other destinations
+                }
+
+                for rule in rules {
+                    self.apply_rule_value(rule, *behavior);
+                }
+            }
+            PermissionUpdate::RemoveRules { destination, rules, behavior } => {
+                if *destination != RuleSource::UserSettings {
+                    return Ok(());
+                }
+
+                for rule in rules {
+                    self.remove_rule_value(rule, *behavior);
+                }
+            }
+        }
+
+        // Save updated config
+        self.save()?;
+        Ok(())
+    }
+
+    /// Apply a single rule value to the config
+    fn apply_rule_value(&mut self, rule: &RuleValue, behavior: RuleBehavior) {
+        match rule.tool_name.as_str() {
+            "Bash" => {
+                let pattern = rule.rule_content.clone().unwrap_or_default();
+                match behavior {
+                    RuleBehavior::Allow => self.permissions.bash.allow.push(pattern),
+                    RuleBehavior::Deny => self.permissions.bash.deny.push(pattern),
+                    RuleBehavior::Ask => self.permissions.bash.ask.push(pattern),
+                }
+            }
+            "Read" => {
+                let path = rule.rule_content.clone().unwrap_or_default();
+                match behavior {
+                    RuleBehavior::Allow => self.permissions.read.allow.push(path),
+                    RuleBehavior::Deny => self.permissions.read.deny.push(path),
+                    RuleBehavior::Ask => self.permissions.read.ask.push(path),
+                }
+            }
+            "Edit" => {
+                let path = rule.rule_content.clone().unwrap_or_default();
+                match behavior {
+                    RuleBehavior::Allow => self.permissions.edit.allow.push(path),
+                    RuleBehavior::Deny => self.permissions.edit.deny.push(path),
+                    RuleBehavior::Ask => self.permissions.edit.ask.push(path),
+                }
+            }
+            _ => {} // Unknown tool, ignore
+        }
+    }
+
+    /// Remove a single rule value from the config
+    fn remove_rule_value(&mut self, rule: &RuleValue, behavior: RuleBehavior) {
+        match rule.tool_name.as_str() {
+            "Bash" => {
+                let pattern = rule.rule_content.clone().unwrap_or_default();
+                match behavior {
+                    RuleBehavior::Allow => self.permissions.bash.allow.retain(|p| p != &pattern),
+                    RuleBehavior::Deny => self.permissions.bash.deny.retain(|p| p != &pattern),
+                    RuleBehavior::Ask => self.permissions.bash.ask.retain(|p| p != &pattern),
+                }
+            }
+            "Read" => {
+                let path = rule.rule_content.clone().unwrap_or_default();
+                match behavior {
+                    RuleBehavior::Allow => self.permissions.read.allow.retain(|p| p != &path),
+                    RuleBehavior::Deny => self.permissions.read.deny.retain(|p| p != &path),
+                    RuleBehavior::Ask => self.permissions.read.ask.retain(|p| p != &path),
+                }
+            }
+            "Edit" => {
+                let path = rule.rule_content.clone().unwrap_or_default();
+                match behavior {
+                    RuleBehavior::Allow => self.permissions.edit.allow.retain(|p| p != &path),
+                    RuleBehavior::Deny => self.permissions.edit.deny.retain(|p| p != &path),
+                    RuleBehavior::Ask => self.permissions.edit.ask.retain(|p| p != &path),
+                }
+            }
+            _ => {} // Unknown tool, ignore
+        }
     }
 }
 

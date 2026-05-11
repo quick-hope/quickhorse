@@ -176,14 +176,14 @@ impl Tool for FileEditTool {
 
     fn check_permissions(&self, input: &serde_json::Value) -> PermissionResult {
         if let Ok(edit_input) = serde_json::from_value::<FileEditInput>(input.clone()) {
-            PermissionResult::Ask(format!(
+            PermissionResult::ask(format!(
                 "Edit file '{}': replace '{}' with '{}'?",
                 edit_input.file_path,
                 edit_input.old_string.lines().next().unwrap_or(&""),
                 edit_input.new_string.lines().next().unwrap_or(&"")
             ))
         } else {
-            PermissionResult::Allow
+            PermissionResult::allow("Could not parse input")
         }
     }
 

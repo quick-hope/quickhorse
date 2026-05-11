@@ -1,5 +1,6 @@
 //! BashTool - Execute shell commands
 
+use crate::permissions::{BashPermissionChecker, PermissionMode};
 use crate::tools::tool_trait::{build_schema, Tool, ToolContext, ToolResult, PermissionResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -27,38 +28,35 @@ fn default_timeout() -> u32 {
     30
 }
 
-/// BashTool - Execute shell commands with safety checks
+/// BashTool - Execute shell commands with permission checks
 pub struct BashTool {
-    /// Dangerous commands that are always blocked
-    blocked_patterns: Vec<String>,
+    /// Permission checker
+    permission_checker: BashPermissionChecker,
 }
 
 impl BashTool {
     /// Create a new BashTool instance
     pub fn new() -> Self {
         Self {
-            blocked_patterns: vec![
-                "rm -rf /".to_string(),
-                "rm -rf /*".to_string(),
-                ":(){ :|:& };:".to_string(),  // Fork bomb
-                "mkfs".to_string(),
-                "dd if=/dev/zero".to_string(),
-                "> /dev/sda".to_string(),
-                "chmod -R 777 /".to_string(),
-                "chown -R".to_string(),
-            ],
+            permission_checker: BashPermissionChecker::new(),
         }
     }
 
-    /// Check if command is dangerous
-    fn is_dangerous(&self, command: &str) -> bool {
-        let lower = command.to_lowercase();
-        for pattern in &self.blocked_patterns {
-            if lower.contains(&pattern.to_lowercase()) {
-                return true;
-            }
+    /// Create with permission mode
+    pub fn with_permission_mode(mode: PermissionMode) -> Self {
+        Self {
+            permission_checker: BashPermissionChecker::with_mode(mode),
         }
-        false
+    }
+
+    /// Get permission checker reference
+    pub fn permission_checker(&self) -> &BashPermissionChecker {
+        &self.permission_checker
+    }
+
+    /// Get mutable permission checker
+    pub fn permission_checker_mut(&mut self) -> &mut BashPermissionChecker {
+        &mut self.permission_checker
     }
 
     /// Sanitize command output
@@ -112,11 +110,24 @@ impl Tool for BashTool {
         let bash_input: BashInput = serde_json::from_value(input.clone())
             .map_err(|e| format!("Invalid input: {}", e))?;
 
-        // Safety check
-        if self.is_dangerous(&bash_input.command) {
-            return Ok(ToolResult::error(
-                "Command blocked for safety reasons. This command could cause irreversible damage.".to_string()
-            ));
+        // Permission check using BashPermissionChecker
+        let perm_result = self.permission_checker.check(&bash_input.command);
+
+        // Handle permission result
+        if perm_result.is_denied() {
+            return Ok(ToolResult::error(format!(
+                "Permission denied: {}",
+                perm_result.message
+            )));
+        }
+
+        // For ask permission, we return a special result that TUI can handle
+        // The Agent layer will handle the user confirmation flow
+        if perm_result.needs_confirmation() {
+            return Ok(ToolResult {
+                content: format!("PERMISSION_REQUEST: {}", perm_result.message),
+                is_error: false, // Not an error, just needs confirmation
+            });
         }
 
         // Timeout handling
@@ -201,24 +212,10 @@ impl Tool for BashTool {
 
     fn check_permissions(&self, input: &serde_json::Value) -> PermissionResult {
         if let Ok(bash_input) = serde_json::from_value::<BashInput>(input.clone()) {
-            if self.is_dangerous(&bash_input.command) {
-                return PermissionResult::Deny(
-                    "This command is blocked for safety reasons.".to_string()
-                );
-            }
-
-            // Ask for destructive commands
-            let destructive_patterns = ["rm", "rmdir", "mv", "chmod", "chown", "kill", "pkill"];
-            for pattern in destructive_patterns {
-                if bash_input.command.contains(pattern) {
-                    return PermissionResult::Ask(format!(
-                        "This command may modify or delete files: '{}'. Allow?",
-                        bash_input.command
-                    ));
-                }
-            }
+            self.permission_checker.check(&bash_input.command)
+        } else {
+            PermissionResult::allow("Could not parse input")
         }
-        PermissionResult::Allow
     }
 
     fn summarize(&self, input: &serde_json::Value) -> String {

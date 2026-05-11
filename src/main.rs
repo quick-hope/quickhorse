@@ -6,6 +6,7 @@
 //! - MCP protocol support
 //! - Session management
 //! - Slash commands
+//! - Permission control with whitelist/blacklist
 
 mod agent;
 mod commands;
@@ -13,7 +14,9 @@ mod config;
 mod error;
 mod log;
 mod mcp;
+mod permissions;
 mod provider;
+mod secure_storage;
 mod session;
 mod tools;
 mod tui;
@@ -21,6 +24,7 @@ mod tui;
 use agent::{Agent, AgentConfig};
 use clap::Parser;
 use config::{Config, ConfigState, SetupWizard};
+use permissions::{PermissionMode, PermissionUpdate};
 use provider::{AnthropicProvider, Message, OpenAIProvider, Provider};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -242,6 +246,7 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
     let agent_config = AgentConfig {
         max_iterations: 10,
         system_prompt: system_prompt.clone(),
+        permission_mode: PermissionMode::Default,
     };
     let mut agent = Agent::new(provider, agent_config);
 
@@ -269,6 +274,21 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
             match event {
                 Event::Key(key) => {
                     app.handle_key(key);
+
+                    // Handle pending permission updates (AllowAndSave)
+                    if let Some(update) = app.pending_permission_updates.take() {
+                        if let Some(ctx) = &mut app.command_ctx {
+                            if let Err(e) = ctx.config.apply_permission_update(&update) {
+                                app.messages.push(Message::assistant(
+                                    format!("Failed to save permission rule: {}", e)
+                                ));
+                            } else {
+                                app.messages.push(Message::assistant(
+                                    "Permission rule saved to config".to_string()
+                                ));
+                            }
+                        }
+                    }
                 }
                 Event::Resize(_, _) => {
                     // Terminal resized, will be handled on next draw
