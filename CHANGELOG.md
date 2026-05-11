@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-11
+
+### Added
+
+#### Permission Control System (Phase 8)
+- `Permission` module with whitelist/blacklist support
+- `PermissionConfig` in config.toml with tool-specific rules
+- `PermissionMode` enum: Default, AcceptEdits, Plan, Auto
+- `RuleBehavior` enum: Allow, Deny, Ask
+- `RuleSource` enum: UserSettings, ProjectSettings, Default
+- `PermissionDialog` TUI component with AllowOnce/AllowAndSave/Deny/Cancel options
+- `PermissionChoice` enum for user decisions
+- BashTool permission checking with pattern matching
+- FileEditTool permission checking for path rules
+- Permission update system for saving rules from user decisions
+- `apply_permission_update()` in Config for rule persistence
+
+#### SecureStorage for API Keys (Phase 9)
+- macOS Keychain integration via `security` CLI commands
+- `KeychainStorage` with hex encoding for safe password storage
+- `EncryptedFileStorage` with XOR encryption + Base64 encoding
+- Machine-specific key derivation (username + hostname + home)
+- `PlainTextStorage` fallback with 0o600 file permissions
+- `get_secure_storage()` platform-aware factory function
+- Config integration: API keys stored only in SecureStorage
+- `skip_serializing_if = "Option::is_none"` for api_key fields
+- Priority chain: SecureStorage > config file > env var
+
+#### Tab Completion System (Phase 10)
+- `Completion` module with `CompletionProvider` trait
+- `CompletionType` enum: Command, Path, Provider, Model
+- `Suggestion` struct with display_text, description, replace_suffix
+- `CompletionState` for managing suggestions list and selection
+- `CommandCompleter` for slash commands (/help, /provider, /model, etc.)
+- `PathCompleter` for file system paths (~/, /, ./, ../)
+- Path expansion: home directory (~), relative paths (., ../)
+- Directory scanning with prefix matching and type sorting
+- Completion popup UI with type-specific colors (Command=Cyan, Path=Yellow)
+- Tab/Shift+Tab navigation, Enter accepts, Esc hides
+- TUI integration in App and UI modules
+
+### Changed
+- Config now uses SecureStorage for API key operations
+- `set_api_key()` stores only in secure storage (no config file fallback)
+- `get_api_key()` checks SecureStorage first, then config, then env
+- BashTool and FileEditTool now check permission rules before execution
+- Agent handles permission requests via PendingPermission
+- TUI App has PermissionDialog for user confirmation
+
+### Security
+- API keys no longer stored in plaintext config files
+- macOS Keychain provides hardware-backed encryption
+- Encrypted file storage for non-macOS platforms
+- File permissions restricted to owner-only (0o600)
+
+### Test Results
+- Unit tests: 78 passed
+- Integration tests: 233 passed
+- Total: 311 tests passing (+186 from v0.2.0)
+
+---
+
 ## [0.2.0] - 2026-05-11
 
 ### Added
