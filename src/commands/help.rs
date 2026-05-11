@@ -1,12 +1,10 @@
 //! Help Command - /help
 
 use super::{Command, CommandContext, CommandResult};
-use async_trait::async_trait;
 
 /// 帮助命令
 pub struct HelpCommand;
 
-#[async_trait]
 impl Command for HelpCommand {
     fn name(&self) -> &str {
         "help"
@@ -20,7 +18,7 @@ impl Command for HelpCommand {
         "/help - List all available slash commands".to_string()
     }
 
-    async fn execute(&self, _args: &[String], _ctx: &mut CommandContext) -> CommandResult {
+    fn execute(&self, _args: &[String], _ctx: &mut CommandContext) -> CommandResult {
         let help_text = [
             "Available Commands:",
             "",

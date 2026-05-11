@@ -1,12 +1,10 @@
 //! Clear Command - /clear
 
 use super::{Command, CommandContext, CommandResult};
-use async_trait::async_trait;
 
 /// 清屏/清除历史命令
 pub struct ClearCommand;
 
-#[async_trait]
 impl Command for ClearCommand {
     fn name(&self) -> &str {
         "clear"
@@ -20,7 +18,7 @@ impl Command for ClearCommand {
         "/clear - Clear all messages in current session".to_string()
     }
 
-    async fn execute(&self, _args: &[String], ctx: &mut CommandContext) -> CommandResult {
+    fn execute(&self, _args: &[String], ctx: &mut CommandContext) -> CommandResult {
         ctx.messages.clear();
         CommandResult::clear()
     }

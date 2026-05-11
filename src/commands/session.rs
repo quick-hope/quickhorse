@@ -1,12 +1,10 @@
 //! Session Command - /session [id]
 
 use super::{Command, CommandContext, CommandResult};
-use async_trait::async_trait;
 
 /// Session 管理命令
 pub struct SessionCommand;
 
-#[async_trait]
 impl Command for SessionCommand {
     fn name(&self) -> &str {
         "session"
@@ -20,7 +18,7 @@ impl Command for SessionCommand {
         "/session [id] - List sessions or switch to a specific session".to_string()
     }
 
-    async fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult {
+    fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult {
         match args.first() {
             Some(session_id) => {
                 // 切换到指定会话

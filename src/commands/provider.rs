@@ -2,7 +2,6 @@
 
 use super::{Command, CommandContext, CommandResult};
 use crate::provider::{AnthropicProvider, GeminiProvider, OllamaProvider, OpenAIProvider, Provider};
-use async_trait::async_trait;
 use std::sync::{Arc, RwLock};
 
 /// Provider 切换命令
@@ -57,7 +56,6 @@ impl ProviderCommand {
     }
 }
 
-#[async_trait]
 impl Command for ProviderCommand {
     fn name(&self) -> &str {
         "provider"
@@ -71,7 +69,7 @@ impl Command for ProviderCommand {
         "/provider [name] - Switch to openai, anthropic, gemini, or ollama".to_string()
     }
 
-    async fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult {
+    fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult {
         match args.first() {
             Some(name) => {
                 // 切换 Provider

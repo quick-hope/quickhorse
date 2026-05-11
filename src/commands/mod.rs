@@ -19,7 +19,6 @@ pub use session::SessionCommand;
 use crate::config::Config;
 use crate::provider::{Message, Provider};
 use crate::session::SessionMetadata;
-use async_trait::async_trait;
 use std::sync::{Arc, RwLock};
 
 /// 命令执行上下文
@@ -110,7 +109,6 @@ impl CommandResult {
 }
 
 /// Command trait - 所有 slash 命令的接口
-#[async_trait]
 #[allow(dead_code)]
 pub trait Command: Send + Sync {
     /// 命令名称 (不含 /)
@@ -122,8 +120,8 @@ pub trait Command: Send + Sync {
     /// 命令用法说明
     fn usage(&self) -> String;
 
-    /// 执行命令
-    async fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult;
+    /// 执行命令（同步版本，用于 TUI）
+    fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult;
 
     /// 验证参数（可选）
     fn validate_args(&self, _args: &[String]) -> Result<(), String> {

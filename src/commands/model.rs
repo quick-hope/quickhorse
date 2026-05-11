@@ -1,12 +1,10 @@
 //! Model Command - /model [name]
 
 use super::{Command, CommandContext, CommandResult};
-use async_trait::async_trait;
 
 /// Model 切换命令
 pub struct ModelCommand;
 
-#[async_trait]
 impl Command for ModelCommand {
     fn name(&self) -> &str {
         "model"
@@ -20,7 +18,7 @@ impl Command for ModelCommand {
         "/model [name] - Switch to a different model".to_string()
     }
 
-    async fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult {
+    fn execute(&self, args: &[String], ctx: &mut CommandContext) -> CommandResult {
         match args.first() {
             Some(model_name) => {
                 // 切换 Model

@@ -77,13 +77,8 @@ impl CommandRegistry {
             return Some(CommandResult::error(e));
         }
 
-        // 执行命令
-        // 注意：由于 TUI 事件循环是同步的，这里使用 block_on
-        let result = tokio::runtime::Handle::current().block_on(async {
-            command.execute(&args, ctx).await
-        });
-
-        Some(result)
+        // 直接同步执行命令（不再需要 async）
+        Some(command.execute(&args, ctx))
     }
 
     /// 获取所有命令的帮助文本
