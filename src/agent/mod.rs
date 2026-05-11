@@ -126,6 +126,8 @@ impl Agent {
                         .to_string(),
                     abort_signal: None,
                     permission_mode: PermissionMode::BypassPermissions,
+                    permissions: crate::permissions::BashPermissionChecker::new(),
+                    provider_capabilities: crate::tools::ProviderCapabilities::default(),
                 };
                 tool.call(pending.input, &context).await
             } else {
@@ -306,6 +308,8 @@ impl Agent {
                 .to_string(),
             abort_signal: None,
             permission_mode: self.config.permission_mode,
+            permissions: crate::permissions::BashPermissionChecker::new(),
+            provider_capabilities: crate::tools::ProviderCapabilities::default(),
         };
 
         // Execute tool
@@ -389,6 +393,8 @@ async fn execute_tool_async(
             .to_string(),
         abort_signal: None,
         permission_mode: permission_mode,
+        permissions: crate::permissions::BashPermissionChecker::new(),
+        provider_capabilities: crate::tools::ProviderCapabilities::default(),
     };
 
     // Execute tool

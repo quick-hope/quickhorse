@@ -1,10 +1,18 @@
 //! Tool trait definition - core interface for all tools
 
 use crate::permissions::PermissionResult as PermResult;
+use crate::permissions::BashPermissionChecker;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+
+/// Provider capabilities for multimodal support
+#[derive(Debug, Clone, Default)]
+pub struct ProviderCapabilities {
+    /// Whether provider supports vision/image input
+    pub multimodal: bool,
+}
 
 /// Context passed to tool execution
 #[allow(dead_code)]
@@ -15,6 +23,10 @@ pub struct ToolContext {
     pub abort_signal: Option<std::sync::Arc<tokio::sync::Notify>>,
     /// Permission mode
     pub permission_mode: crate::permissions::PermissionMode,
+    /// Permission checker
+    pub permissions: BashPermissionChecker,
+    /// Provider capabilities
+    pub provider_capabilities: ProviderCapabilities,
 }
 
 impl Default for ToolContext {
@@ -26,6 +38,8 @@ impl Default for ToolContext {
                 .to_string(),
             abort_signal: None,
             permission_mode: crate::permissions::PermissionMode::Default,
+            permissions: BashPermissionChecker::new(),
+            provider_capabilities: ProviderCapabilities::default(),
         }
     }
 }

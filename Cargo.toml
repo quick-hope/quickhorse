@@ -1,6 +1,6 @@
 [package]
 name = "quickhorse"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 description = "A CLI coding agent written in Rust"
 license = "MIT"
@@ -53,6 +53,10 @@ chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2.2"
 unicode-segmentation = "1.10"
 unicode-normalization = "0.1"
+
+# Image processing
+image = "0.25"
+base64 = "0.22"
 
 # Test utilities (also used for integration tests)
 tempfile = "3.10"

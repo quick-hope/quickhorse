@@ -1,28 +1,32 @@
 //! Tools module - tool implementations for the coding agent
 
 mod bash;
+mod database;
 mod execute;
 mod file_edit;
 mod file_read;
 mod git;
 mod glob;
 mod grep;
+mod image;
 mod patch;
 mod tool_trait;
 mod web_fetch;
 mod write;
 
 pub use bash::BashTool;
+pub use database::DatabaseTool;
 pub use execute::ExecuteTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use git::GitTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
+pub use image::ImageTool;
 pub use patch::PatchTool;
 pub use web_fetch::WebFetchTool;
 pub use write::WriteTool;
-pub use tool_trait::{Tool, ToolContext, ToolResult, build_schema};
+pub use tool_trait::{Tool, ToolContext, ToolResult, ProviderCapabilities, build_schema};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,12 +49,14 @@ impl ToolRegistry {
     pub fn with_default_tools() -> Self {
         let mut registry = Self::new();
         registry.register(Arc::new(BashTool::new()));
+        registry.register(Arc::new(DatabaseTool::new()));
         registry.register(Arc::new(FileReadTool::new()));
         registry.register(Arc::new(FileEditTool::new()));
         registry.register(Arc::new(WriteTool::new()));
         registry.register(Arc::new(PatchTool::new()));
         registry.register(Arc::new(ExecuteTool::new()));
         registry.register(Arc::new(GitTool::new()));
+        registry.register(Arc::new(ImageTool::new()));
         registry.register(Arc::new(GlobTool::new()));
         registry.register(Arc::new(GrepTool::new()));
         registry.register(Arc::new(WebFetchTool::new()));
