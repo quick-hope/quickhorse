@@ -7,6 +7,7 @@ mod glob;
 mod grep;
 mod tool_trait;
 mod web_fetch;
+mod write;
 
 pub use bash::BashTool;
 pub use file_edit::FileEditTool;
@@ -14,7 +15,8 @@ pub use file_read::FileReadTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use web_fetch::WebFetchTool;
-pub use tool_trait::{Tool, ToolContext, ToolResult};
+pub use write::WriteTool;
+pub use tool_trait::{Tool, ToolContext, ToolResult, build_schema};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,6 +40,7 @@ impl ToolRegistry {
         registry.register(Arc::new(BashTool::new()));
         registry.register(Arc::new(FileReadTool::new()));
         registry.register(Arc::new(FileEditTool::new()));
+        registry.register(Arc::new(WriteTool::new()));
         registry.register(Arc::new(GlobTool::new()));
         registry.register(Arc::new(GrepTool::new()));
         registry.register(Arc::new(WebFetchTool::new()));
