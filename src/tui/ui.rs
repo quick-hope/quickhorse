@@ -91,25 +91,31 @@ fn render_messages(f: &mut Frame, app: &App, area: Rect) {
     // Add streaming text if currently streaming
     let all_lines: Vec<Line> = if app.is_streaming && !app.streaming_text.is_empty() {
         let streaming_lines: Vec<Line> = app.streaming_text.lines()
-            .map(|line| Line::from(vec![
-                Span::styled("Assistant: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::styled(line.to_string(), Style::default().fg(Color::Green)),
-            ]))
+            .map(|line| Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Green))))
             .collect();
         messages.into_iter().chain(streaming_lines).collect()
     } else {
         messages
     };
 
-    let block = Block::default()
-        .title(" Messages ")
-        .title_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Blue));
+    // Auto-scroll to follow latest output when streaming or loading
+    let total_lines = all_lines.len();
+    let visible_lines = area.height as usize;
+    let scroll_offset = if app.auto_scroll || app.is_streaming || app.is_loading {
+        // Follow latest: scroll to bottom
+        if total_lines > visible_lines {
+            total_lines - visible_lines
+        } else {
+            0
+        }
+    } else {
+        // User scrolling: use manual scroll position
+        app.scroll as usize
+    };
 
+    // No border for messages area
     let paragraph = Paragraph::new(all_lines)
-        .block(block)
-        .scroll((app.scroll, 0));
+        .scroll((scroll_offset as u16, 0));
 
     f.render_widget(paragraph, area);
 }
@@ -133,19 +139,16 @@ fn render_message_lines(msg: &Message) -> Vec<Line<'static>> {
     for block in &msg.content {
         match block {
             ContentBlock::Text { text } => {
-                let (prefix, style) = match msg.role.as_str() {
-                    "user" => ("You: ", Style::default().fg(Color::Cyan)),
-                    "assistant" => ("Assistant: ", Style::default().fg(Color::Green)),
-                    "system" => ("System: ", Style::default().fg(Color::Yellow)),
-                    _ => ("", Style::default()),
+                let style = match msg.role.as_str() {
+                    "user" => Style::default().fg(Color::Cyan),
+                    "assistant" => Style::default().fg(Color::Green),
+                    "system" => Style::default().fg(Color::Yellow),
+                    _ => Style::default(),
                 };
 
-                // Split text into lines for display
+                // Split text into lines for display (no prefix)
                 for line_text in text.lines() {
-                    let line = Line::from(vec![
-                        Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
-                        Span::styled(line_text.to_string(), style),
-                    ]);
+                    let line = Line::from(Span::styled(line_text.to_string(), style));
                     lines.push(line);
                 }
             }

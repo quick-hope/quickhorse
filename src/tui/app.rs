@@ -295,6 +295,8 @@ pub struct App {
     pub completer: CommandCompleter,
     /// Path completer
     pub path_completer: PathCompleter,
+    /// Auto scroll to follow latest output (true by default, false when user scrolls up)
+    pub auto_scroll: bool,
 }
 
 /// Result of permission choice selection
@@ -340,6 +342,7 @@ impl App {
             completion_state: CompletionState::new(),
             completer: CommandCompleter::new(registry),
             path_completer: PathCompleter::new(),
+            auto_scroll: true,
         }
     }
 
@@ -370,6 +373,7 @@ impl App {
             completion_state: CompletionState::new(),
             completer: CommandCompleter::new(registry),
             path_completer: PathCompleter::new(),
+            auto_scroll: true,
         }
     }
 
@@ -545,6 +549,7 @@ impl App {
             // Allow scrolling while loading
             match key.code {
                 KeyCode::Up => {
+                    self.auto_scroll = false;
                     if self.scroll > 0 {
                         self.scroll -= 1;
                     }
@@ -553,6 +558,7 @@ impl App {
                     self.scroll += 1;
                 }
                 KeyCode::PageUp => {
+                    self.auto_scroll = false;
                     if self.scroll > 5 {
                         self.scroll -= 5;
                     } else {
@@ -656,6 +662,7 @@ impl App {
                 self.completion_state.hide();
             }
             KeyCode::PageUp => {
+                self.auto_scroll = false; // User scrolling up, stop auto-follow
                 if self.scroll > 5 {
                     self.scroll -= 5;
                 } else {
@@ -664,6 +671,8 @@ impl App {
             }
             KeyCode::PageDown => {
                 self.scroll += 5;
+                // Don't set auto_scroll = false for PageDown
+                // If user scrolls to bottom, auto_scroll will naturally resume
             }
             KeyCode::Esc => {
                 // If completion visible, hide it; otherwise clear input
@@ -683,6 +692,10 @@ impl App {
         if text.is_empty() {
             return;
         }
+
+        // Enable auto scroll when sending new message
+        self.auto_scroll = true;
+        self.scroll = 0;
 
         // Check if it's a slash command
         if CommandRegistry::is_command(&text) {
