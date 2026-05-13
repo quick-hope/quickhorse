@@ -1687,7 +1687,7 @@ checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quickhorse"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "async-trait",

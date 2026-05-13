@@ -101,16 +101,20 @@ fn render_messages(f: &mut Frame, app: &App, area: Rect) {
     // Auto-scroll to follow latest output when streaming or loading
     let total_lines = all_lines.len();
     let visible_lines = area.height as usize;
+
+    // Calculate max scroll position (don't scroll past content)
+    let max_scroll = if total_lines > visible_lines {
+        total_lines - visible_lines
+    } else {
+        0
+    };
+
     let scroll_offset = if app.auto_scroll || app.is_streaming || app.is_loading {
         // Follow latest: scroll to bottom
-        if total_lines > visible_lines {
-            total_lines - visible_lines
-        } else {
-            0
-        }
+        max_scroll
     } else {
-        // User scrolling: use manual scroll position
-        app.scroll as usize
+        // User scrolling: use manual scroll position, but clamp to max
+        (app.scroll as usize).min(max_scroll)
     };
 
     // No border for messages area
