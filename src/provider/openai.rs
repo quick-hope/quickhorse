@@ -387,13 +387,7 @@ impl OpenAIProvider {
                                         if let Some(choice) = stream_resp.choices.first() {
                                             // Text delta
                                             if let Some(delta) = &choice.delta {
-                                                // Handle reasoning_content (for reasoning models like qwen3.6-plus)
-                                                // The reasoning/thinking content is emitted as TextDelta
-                                                if let Some(reasoning) = &delta.reasoning_content {
-                                                    if !reasoning.is_empty() {
-                                                        tx.send(StreamEvent::TextDelta(reasoning.clone())).await.ok();
-                                                    }
-                                                }
+                                                // Skip reasoning_content (thinking process) - don't output
                                                 // Handle content (actual response)
                                                 if let Some(content) = &delta.content {
                                                     if !content.is_empty() {

@@ -29,7 +29,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_iterations: 10,
-            system_prompt: "You are QuickHorse, a CLI coding agent. You have access to tools for executing commands, reading files, and more. Use tools when appropriate to help the user with their requests.".to_string(),
+            system_prompt: "You are a CLI coding agent. Execute tasks efficiently using available tools. Be concise in responses. Focus on completing user requests with minimal explanation. Use tools directly when appropriate.".to_string(),
             permission_mode: PermissionMode::Default,
         }
     }

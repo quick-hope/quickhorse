@@ -253,21 +253,23 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
     // Add system message
     app.messages.push(Message::system(system_prompt));
     app.messages.push(Message::assistant(
-        "Hello! I'm QuickHorse, your CLI coding assistant with tool support.\n\
-         I can execute commands, read files, and help with programming tasks.\n\
-         Type /help to see available commands.\n\
-         How can I help you today?".to_string()
+        "Ready. Type /help for commands.".to_string()
     ));
+
+    // Sync initial messages to history_cells
+    app.sync_messages_to_history_cells();
 
     // Main loop
     loop {
         // Handle streaming events (non-blocking)
         if app.is_streaming {
             app.handle_stream_event();
+            // Sync during streaming as well
+            app.sync_messages_to_history_cells();
         }
 
         // Draw UI
-        terminal.draw(|f| render(f, &app))?;
+        terminal.draw(|f| render(f, &mut app))?;
 
         // Handle events
         if let Ok(event) = events.recv() {
@@ -299,6 +301,9 @@ fn run_tui(provider: Arc<RwLock<dyn Provider>>, config: Config, system_prompt: S
                 Event::Tick => {
                     // Update progress animations
                     app.progress_manager.tick();
+
+                    // Sync messages to history_cells for widget rendering
+                    app.sync_messages_to_history_cells();
 
                     // Handle streaming events on tick
                     if app.is_streaming {
