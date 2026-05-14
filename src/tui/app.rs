@@ -8,6 +8,9 @@ use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiv
 use crate::tui::completion::{CommandCompleter, CompletionProvider, CompletionState, PathCompleter};
 use crate::tui::permission_dialog::{PermissionChoice, PermissionDialog};
 use crate::tui::progress::{ProgressManager, ToolStatus};
+use crate::tui::history_cell::HistoryCell;
+use crate::tui::scroll_state::TranscriptScroll;
+use crate::tui::transcript_cache::TranscriptViewCache;
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -253,8 +256,20 @@ impl Default for TextEditor {
 pub struct App {
     /// Text editor for input
     pub editor: TextEditor,
-    /// Chat messages
+    /// Chat messages (raw format from provider)
     pub messages: Vec<Message>,
+    /// History cells for rendering (converted from messages)
+    pub history_cells: Vec<HistoryCell>,
+    /// Per-cell revision counters for caching
+    pub history_revisions: Vec<u64>,
+    /// Active cell revision (for streaming cells)
+    pub active_cell_revision: u64,
+    /// Transcript scroll state
+    pub transcript_scroll: TranscriptScroll,
+    /// Pending scroll delta to apply at render time
+    pub pending_scroll_delta: i32,
+    /// Transcript view cache
+    pub viewport_cache: TranscriptViewCache,
     /// Status message
     pub status: String,
     /// Whether the app should quit
@@ -267,7 +282,7 @@ pub struct App {
     pub stream_rx: Option<StreamReceiver>,
     /// Current streaming text being accumulated
     pub streaming_text: String,
-    /// Scroll position for message area
+    /// Scroll position for message area (legacy, use transcript_scroll)
     pub scroll: u16,
     /// Command registry for slash commands
     pub command_registry: CommandRegistry,
@@ -297,6 +312,10 @@ pub struct App {
     pub path_completer: PathCompleter,
     /// Auto scroll to follow latest output (true by default, false when user scrolls up)
     pub auto_scroll: bool,
+    /// Provider name for header display
+    pub provider_name: String,
+    /// Model name for header display
+    pub model_name: String,
 }
 
 /// Result of permission choice selection
@@ -322,6 +341,12 @@ impl App {
         Self {
             editor: TextEditor::new(),
             messages: Vec::new(),
+            history_cells: Vec::new(),
+            history_revisions: Vec::new(),
+            active_cell_revision: 0,
+            transcript_scroll: TranscriptScroll::to_bottom(),
+            pending_scroll_delta: 0,
+            viewport_cache: TranscriptViewCache::new(),
             status: "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string(),
             should_quit: false,
             is_loading: false,
@@ -343,16 +368,35 @@ impl App {
             completer: CommandCompleter::new(registry),
             path_completer: PathCompleter::new(),
             auto_scroll: true,
+            provider_name: "openai".to_string(),
+            model_name: "gpt-4".to_string(),
         }
     }
 
     /// Create App with Provider
     pub fn with_provider(provider: Arc<RwLock<dyn Provider>>, config: Config) -> Self {
-        let ctx = CommandContext::new(provider, config.clone());
+        let ctx = CommandContext::new(provider.clone(), config.clone());
         let registry = Arc::new(CommandRegistry::new());
+
+        // Get provider and model names
+        let provider_name = {
+            let guard = provider.read().unwrap();
+            guard.name().to_string()
+        };
+        let model_name = {
+            let guard = provider.read().unwrap();
+            guard.model().to_string()
+        };
+
         Self {
             editor: TextEditor::new(),
             messages: Vec::new(),
+            history_cells: Vec::new(),
+            history_revisions: Vec::new(),
+            active_cell_revision: 0,
+            transcript_scroll: TranscriptScroll::to_bottom(),
+            pending_scroll_delta: 0,
+            viewport_cache: TranscriptViewCache::new(),
             status: "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string(),
             should_quit: false,
             is_loading: false,
@@ -374,6 +418,8 @@ impl App {
             completer: CommandCompleter::new(registry),
             path_completer: PathCompleter::new(),
             auto_scroll: true,
+            provider_name,
+            model_name,
         }
     }
 
@@ -402,6 +448,144 @@ impl App {
         self.permission_dialog = None;
         self.pending_permission_updates = None;
         self.status = "Type your message. Enter to send, Ctrl+Enter for newline. Ctrl+C twice to quit.".to_string();
+    }
+
+    /// Sync messages to history_cells for widget rendering.
+    /// Converts Message objects to HistoryCell objects.
+    /// Always syncs to ensure content updates (especially during streaming) are reflected.
+    pub fn sync_messages_to_history_cells(&mut self) {
+        // Always rebuild to capture content changes (streaming updates)
+        // This is O(n) but ensures correct rendering during streaming
+
+        // Clear and rebuild
+        self.history_cells.clear();
+        self.history_revisions.clear();
+
+        // Start with revision 1
+        let mut revision = 1u64;
+
+        for msg in &self.messages {
+            let cell = self.message_to_history_cell(msg);
+            // Check if streaming before pushing
+            let is_streaming = cell.is_streaming();
+            self.history_cells.push(cell);
+
+            // Increment revision for streaming cells to force re-render
+            if is_streaming {
+                self.active_cell_revision += 1;
+                self.history_revisions.push(self.active_cell_revision);
+            } else {
+                self.history_revisions.push(revision);
+                revision += 1;
+            }
+        }
+    }
+
+    /// Convert a Message to a HistoryCell.
+    fn message_to_history_cell(&self, msg: &Message) -> HistoryCell {
+        match msg.role.as_str() {
+            "user" => {
+                // Extract text content
+                let text = msg.content.iter()
+                    .filter_map(|block| {
+                        if let ContentBlock::Text { text } = block {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                HistoryCell::User { content: text }
+            }
+            "assistant" => {
+                let text = msg.content.iter()
+                    .filter_map(|block| {
+                        if let ContentBlock::Text { text } = block {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                // Check if this is the last message and we're streaming
+                let is_last = self.messages.last().map_or(false, |last| {
+                    last.content.iter().any(|b| matches!(b, ContentBlock::Text { .. }))
+                        && last.role == "assistant"
+                });
+                HistoryCell::Assistant {
+                    content: text,
+                    streaming: self.is_streaming && is_last,
+                }
+            }
+            "system" => {
+                let text = msg.content.iter()
+                    .filter_map(|block| {
+                        if let ContentBlock::Text { text } = block {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                HistoryCell::System { content: text }
+            }
+            _ => {
+                // Unknown role - treat as error
+                HistoryCell::Error {
+                    message: format!("Unknown role: {}", msg.role),
+                }
+            }
+        }
+    }
+
+    /// Handle scroll up - accumulate delta to apply at render time.
+    pub fn scroll_up(&mut self, lines: usize) {
+        self.pending_scroll_delta -= lines as i32;
+        self.auto_scroll = false;
+    }
+
+    /// Handle scroll down - accumulate delta to apply at render time.
+    pub fn scroll_down(&mut self, lines: usize) {
+        self.pending_scroll_delta += lines as i32;
+        // Note: auto_scroll will be re-enabled at render time if we reach tail
+    }
+
+    /// Resolve scroll state for rendering with actual dimensions.
+    /// Returns resolved scroll state and clears pending delta.
+    pub fn resolve_scroll_for_render(&mut self, total_lines: usize, visible_lines: usize) -> TranscriptScroll {
+        // Apply pending delta
+        if self.pending_scroll_delta != 0 {
+            self.transcript_scroll = self.transcript_scroll.scrolled_by(
+                self.pending_scroll_delta,
+                total_lines,
+                visible_lines,
+            );
+            self.pending_scroll_delta = 0;
+        }
+
+        // Check if we reached tail
+        if self.transcript_scroll.is_at_tail() {
+            self.auto_scroll = true;
+        }
+
+        self.transcript_scroll
+    }
+
+    /// Update viewport cache for current history_cells.
+    pub fn update_viewport_cache(&mut self, width: u16) {
+        self.sync_messages_to_history_cells();
+        self.viewport_cache.clear();
+
+        // Convert history_cells to lines
+        let cell_lines: Vec<Vec<ratatui::text::Line<'static>>> = self.history_cells
+            .iter()
+            .map(|cell| cell.lines(width))
+            .collect();
+
+        self.viewport_cache.ensure(&cell_lines, &self.history_revisions, width);
     }
 
     /// Handle permission confirmation with full PermissionChoice support
@@ -636,10 +820,8 @@ impl App {
                 } else if self.editor.cursor_row > 0 {
                     self.editor.move_up();
                 } else {
-                    // Scroll messages when at first line
-                    if self.scroll > 0 {
-                        self.scroll -= 1;
-                    }
+                    // Scroll messages when at first line - use transcript_scroll
+                    self.scroll_up(1);
                 }
             }
             KeyCode::Down => {
@@ -649,8 +831,8 @@ impl App {
                 } else if self.editor.cursor_row + 1 < self.editor.lines().len() {
                     self.editor.move_down();
                 } else {
-                    // Scroll messages when at last line
-                    self.scroll += 1;
+                    // Scroll messages when at last line - use transcript_scroll
+                    self.scroll_down(1);
                 }
             }
             KeyCode::Home => {
@@ -662,17 +844,12 @@ impl App {
                 self.completion_state.hide();
             }
             KeyCode::PageUp => {
-                self.auto_scroll = false; // User scrolling up, stop auto-follow
-                if self.scroll > 5 {
-                    self.scroll -= 5;
-                } else {
-                    self.scroll = 0;
-                }
+                // Scroll up by 5 lines using transcript_scroll
+                self.scroll_up(5);
             }
             KeyCode::PageDown => {
-                self.scroll += 5;
-                // Don't set auto_scroll = false for PageDown
-                // If user scrolls to bottom, auto_scroll will naturally resume
+                // Scroll down by 5 lines using transcript_scroll
+                self.scroll_down(5);
             }
             KeyCode::Esc => {
                 // If completion visible, hide it; otherwise clear input

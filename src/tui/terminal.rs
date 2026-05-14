@@ -1,8 +1,8 @@
-//! Terminal management for TUI (main screen mode - preserves content after exit)
+//! Terminal management for TUI
 
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal as RatatuiTerminal};
 use std::io::{self, Stdout};
@@ -13,17 +13,17 @@ pub type Backend = CrosstermBackend<Stdout>;
 /// Terminal type
 pub type Terminal = RatatuiTerminal<Backend>;
 
-/// Initialize the terminal (main screen - content preserved after exit)
+/// Initialize the terminal
 pub fn init() -> io::Result<Terminal> {
     enable_raw_mode()?;
-    // No EnterAlternateScreen - use main screen so content is preserved
-    let stdout = io::stdout();
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = Backend::new(stdout);
     RatatuiTerminal::new(backend)
 }
 
-/// Restore the terminal (just disable raw mode - content stays in history)
+/// Restore the terminal
 pub fn restore() -> io::Result<()> {
-    // No LeaveAlternateScreen - content preserved in terminal history
-    disable_raw_mode()
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen)
 }
