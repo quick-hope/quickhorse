@@ -17,6 +17,7 @@ use unicode_width::UnicodeWidthStr;
 
 /// Tool execution status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Used in tests and future integration
 pub enum ToolStatusKind {
     /// Tool is currently running.
     Running,
@@ -29,6 +30,7 @@ pub enum ToolStatusKind {
 }
 
 /// ToolCardWidget displays a tool execution card.
+#[allow(dead_code)] // Future integration with transcript
 pub struct ToolCardWidget {
     /// Tool name.
     name: String,
@@ -50,6 +52,7 @@ pub struct ToolCardWidget {
 
 /// Theme colors for ToolCard.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Future use
 pub struct ToolCardTheme {
     pub running_color: Color,
     pub success_color: Color,
@@ -74,6 +77,7 @@ impl Default for ToolCardTheme {
     }
 }
 
+#[allow(dead_code)] // Future integration
 impl ToolCardWidget {
     /// Create a new tool card.
     pub fn new(
@@ -241,6 +245,7 @@ impl Widget for ToolCardWidget {
 }
 
 /// Truncate string to fit width.
+#[allow(dead_code)] // Used in tests
 fn truncate_to_width(s: &str, max_width: usize) -> String {
     if s.width() <= max_width {
         return s.to_string();

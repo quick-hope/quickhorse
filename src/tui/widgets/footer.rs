@@ -23,6 +23,7 @@ pub struct FooterWidget {
 
 /// Pre-computed data for footer rendering.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Future use: tokens, background
 pub struct FooterProps {
     /// Mode label ("agent", "yolo", "plan").
     pub mode_label: &'static str,
@@ -53,6 +54,7 @@ impl FooterWidget {
     }
 
     /// Create default footer (ready state).
+    #[allow(dead_code)] // Future use
     pub fn ready() -> Self {
         Self::new(FooterProps {
             mode_label: "agent",
@@ -69,6 +71,7 @@ impl FooterWidget {
     }
 
     /// Create footer for streaming state.
+    #[allow(dead_code)] // Future use
     pub fn streaming(tool_count: usize) -> Self {
         Self::new(FooterProps {
             mode_label: "agent",
@@ -85,6 +88,7 @@ impl FooterWidget {
     }
 
     /// Create footer for working state (tools active).
+    #[allow(dead_code)] // Future use
     pub fn working(tool_count: usize, duration_secs: f32) -> Self {
         Self::new(FooterProps {
             mode_label: "agent",
