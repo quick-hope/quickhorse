@@ -2,6 +2,8 @@
 //!
 //! Based on OpenClaude's Spinner.tsx and ProgressBar.tsx
 
+#![allow(dead_code)] // Future use: progress UI integration
+
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},

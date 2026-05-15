@@ -5,6 +5,8 @@
 //!
 //! File permissions are restricted (0o600) to limit access.
 
+#![allow(dead_code)] // Future use: plaintext fallback
+
 use super::{get_storage_dir, SecureStorage, SecureStorageData};
 use std::error::Error;
 use std::fs;

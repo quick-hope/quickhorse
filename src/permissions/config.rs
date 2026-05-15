@@ -2,6 +2,8 @@
 //!
 //! Loads and saves permission settings from config.toml.
 
+#![allow(dead_code)] // Future use: permission config persistence
+
 use super::types::PermissionMode;
 use super::bash::BashPermissionConfig;
 use serde::{Deserialize, Serialize};

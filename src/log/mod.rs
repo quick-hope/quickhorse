@@ -3,6 +3,8 @@
 //! Provides tracing-based logging with file and terminal output.
 //! Reference: OpenClaude src/types/logs.ts, src/utils/log.ts, src/utils/diagLogs.ts
 
+#![allow(dead_code)] // Future use: full logging integration
+
 mod types;
 mod config;
 mod sink;

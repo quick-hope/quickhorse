@@ -1,5 +1,7 @@
 //! OpenAI provider implementation
 
+#![allow(dead_code)] // Future use: OpenAI streaming types
+
 use crate::provider::{ContentBlock, Message, Provider, StreamEvent, StreamReceiver, create_stream_channel, stream::sse};
 use crate::error::{ErrorCode, QuickHorseError, classify_provider_error, classify_reqwest_error};
 use async_trait::async_trait;

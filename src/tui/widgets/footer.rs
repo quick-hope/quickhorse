@@ -189,7 +189,7 @@ pub const WAVE_GLYPHS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '�
 
 /// Get wave glyph for animation frame.
 #[must_use]
-pub fn get_wave_glyph(frame: u64, col: usize, width: usize) -> char {
+pub fn get_wave_glyph(frame: u64, col: usize, _width: usize) -> char {
     let idx = (frame as usize + col) % WAVE_GLYPHS.len();
     WAVE_GLYPHS[idx]
 }

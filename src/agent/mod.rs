@@ -1,5 +1,7 @@
 //! Agent module - core agent logic with tool call loop
 
+#![allow(dead_code)] // Future use: context compression
+
 mod context;
 
 pub use context::{
@@ -8,7 +10,7 @@ pub use context::{
     compression_stats, CompressionStats, DEFAULT_MAX_TOKENS,
 };
 
-use crate::permissions::{PermissionMode, PermissionResult};
+use crate::permissions::PermissionMode;
 use crate::provider::{ContentBlock, Message, Provider};
 use crate::tools::{Tool, ToolContext, ToolRegistry, ToolResult};
 use futures::future::join_all;

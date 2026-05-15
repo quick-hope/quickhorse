@@ -2,6 +2,8 @@
 //!
 //! Implements security checks for Bash tool execution.
 
+#![allow(dead_code)] // Future use: bash permission rules
+
 use super::types::{
     PermissionMode, PermissionResult, PermissionRule,
     PermissionUpdate, RuleBehavior, RuleSource, RuleValue, DecisionReason,

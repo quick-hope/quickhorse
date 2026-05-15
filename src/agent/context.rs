@@ -5,6 +5,8 @@
 //! - Context compression when exceeding limits
 //! - Message trimming strategies
 
+#![allow(dead_code)] // Future use: context compression
+
 use crate::provider::{ContentBlock, Message};
 
 /// Default maximum tokens before compression

@@ -1,5 +1,7 @@
 //! Tool trait definition - core interface for all tools
 
+#![allow(dead_code)] // Future use: tool capabilities
+
 use crate::permissions::PermissionResult as PermResult;
 use crate::permissions::BashPermissionChecker;
 use async_trait::async_trait;

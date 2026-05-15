@@ -2,6 +2,8 @@
 //!
 //! Provides real-time streaming output using tokio channels.
 
+#![allow(dead_code)] // Future use: SSE streaming
+
 use tokio::sync::mpsc;
 
 /// Streaming event types

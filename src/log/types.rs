@@ -2,6 +2,8 @@
 //!
 //! Reference: OpenClaude src/types/logs.ts
 
+#![allow(dead_code)] // Future use: log types integration
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

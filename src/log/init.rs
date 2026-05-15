@@ -2,6 +2,8 @@
 //!
 //! Provides logging setup with file and terminal output.
 
+#![allow(dead_code)] // Future use: init functions
+
 use tracing_subscriber::{
     fmt, EnvFilter, Layer, Registry,
     layer::SubscriberExt,

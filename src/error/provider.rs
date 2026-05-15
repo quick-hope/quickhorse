@@ -1,5 +1,7 @@
 //! Provider error parsing - Parse provider-specific error formats
 
+#![allow(dead_code)] // Future use: provider error parsing
+
 use super::{ErrorCode, QuickHorseError};
 use super::api::from_http_status_with_body;
 

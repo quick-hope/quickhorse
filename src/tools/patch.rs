@@ -5,6 +5,8 @@
 //! - Apply changes to file content
 //! - Detect and report conflicts
 
+#![allow(dead_code)] // Future use: patch conflict fields
+
 use crate::permissions::{PermissionBehavior, PermissionMode};
 use crate::tools::{Tool, ToolContext, ToolResult, build_schema};
 use async_trait::async_trait;
@@ -158,11 +160,11 @@ fn parse_range_number(s: &str, is_start: bool) -> u32 {
 /// Apply hunks to file content
 fn apply_hunks(content: &str, hunks: &[DiffHunk]) -> Result<(String, Vec<ConflictInfo>), String> {
     let mut file_lines: Vec<&str> = content.lines().collect();
-    let mut conflicts = Vec::new();
+    let conflicts = Vec::new();
 
     // Process hunks in reverse order (from end of file to start)
     // This ensures line numbers remain valid after modifications
-    for (hunk_idx, hunk) in hunks.iter().enumerate().rev() {
+    for (_hunk_idx, hunk) in hunks.iter().enumerate().rev() {
         // Line numbers in diff are 1-indexed, convert to 0-indexed
         let start_line = (hunk.old_start as usize).saturating_sub(1);
 
@@ -337,7 +339,7 @@ fn expand_path(path: &str) -> PathBuf {
 }
 
 /// Check permission for patch operation
-fn check_patch_permission(path: &PathBuf, mode: PermissionMode) -> PermissionBehavior {
+fn check_patch_permission(_path: &PathBuf, mode: PermissionMode) -> PermissionBehavior {
     match mode {
         PermissionMode::Default => PermissionBehavior::Ask,
         PermissionMode::AcceptEdits => PermissionBehavior::Allow,

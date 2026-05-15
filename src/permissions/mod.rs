@@ -6,6 +6,8 @@
 //! - Bash command safety classification
 //! - User confirmation flow integration
 
+#![allow(dead_code)] // Future use: permission rules integration
+
 mod types;
 mod bash;
 mod config;

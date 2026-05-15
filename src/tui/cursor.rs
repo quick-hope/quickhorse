@@ -8,6 +8,8 @@
 //! Key concepts from OpenClaude:
 //! - All text is normalized to NFC for consistent handling
 //! - Grapheme clusters (like 👨‍👩‍👧‍👦) are treated as single units
+
+#![allow(dead_code)] // Future use: full cursor/kill-ring implementation
 //! - Display width is calculated for CJK characters (2 width each)
 //! - Wrapped lines account for terminal width
 

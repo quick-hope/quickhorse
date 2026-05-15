@@ -2,6 +2,8 @@
 //!
 //! Defines the permission system for tool execution control.
 
+#![allow(dead_code)] // Future use: permission types
+
 use serde::{Deserialize, Serialize};
 
 /// Permission mode - determines how permission checks are handled

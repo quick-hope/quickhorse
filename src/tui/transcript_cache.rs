@@ -8,6 +8,8 @@
 //! tracking a per-cell revision counter.
 //!
 //! Each cell index has a paired `revision: u64`. The cache stores
+
+#![allow(dead_code)] // Future use: per-cell caching integration
 //! `Vec<CachedCell>` with `(cell_index, revision, lines)`. On
 //! `ensure`, walk the cells; if a cell's current `revision` matches the cached
 //! one (and width/options haven't changed), reuse the rendered lines.

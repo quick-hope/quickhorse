@@ -8,6 +8,8 @@
 //! - Windows: Encrypted file storage (Credential Manager requires Windows-specific APIs)
 //! - Fallback: Encrypted file with user-specific key
 
+#![allow(dead_code)] // Future use: secure storage backends
+
 mod encrypted_file;
 mod keychain;
 mod plain_text;

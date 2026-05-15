@@ -3,6 +3,8 @@
 //! Uses the `security` CLI to interact with macOS Keychain Services.
 //! This approach is portable and doesn't require native Rust bindings.
 
+#![allow(dead_code)] // Future use: keychain backend
+
 use super::{get_service_name, get_username, SecureStorage, SecureStorageData};
 use std::error::Error;
 use std::process::Command;
