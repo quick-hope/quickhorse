@@ -1,5 +1,7 @@
 //! API error - HTTP status code mapping
 
+#![allow(dead_code)] // Future use: API error display
+
 use super::{ErrorCode, ErrorCategory, QuickHorseError};
 use super::types::ApiCategory;
 

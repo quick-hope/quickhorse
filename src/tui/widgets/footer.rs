@@ -23,6 +23,7 @@ pub struct FooterWidget {
 
 /// Pre-computed data for footer rendering.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Future use: tokens, background
 pub struct FooterProps {
     /// Mode label ("agent", "yolo", "plan").
     pub mode_label: &'static str,
@@ -53,6 +54,7 @@ impl FooterWidget {
     }
 
     /// Create default footer (ready state).
+    #[allow(dead_code)] // Future use
     pub fn ready() -> Self {
         Self::new(FooterProps {
             mode_label: "agent",
@@ -69,6 +71,7 @@ impl FooterWidget {
     }
 
     /// Create footer for streaming state.
+    #[allow(dead_code)] // Future use
     pub fn streaming(tool_count: usize) -> Self {
         Self::new(FooterProps {
             mode_label: "agent",
@@ -85,6 +88,7 @@ impl FooterWidget {
     }
 
     /// Create footer for working state (tools active).
+    #[allow(dead_code)] // Future use
     pub fn working(tool_count: usize, duration_secs: f32) -> Self {
         Self::new(FooterProps {
             mode_label: "agent",
@@ -185,7 +189,7 @@ pub const WAVE_GLYPHS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '�
 
 /// Get wave glyph for animation frame.
 #[must_use]
-pub fn get_wave_glyph(frame: u64, col: usize, width: usize) -> char {
+pub fn get_wave_glyph(frame: u64, col: usize, _width: usize) -> char {
     let idx = (frame as usize + col) % WAVE_GLYPHS.len();
     WAVE_GLYPHS[idx]
 }

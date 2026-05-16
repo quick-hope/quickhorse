@@ -308,35 +308,37 @@ fn render_error(message: &str, width: u16) -> Vec<Line<'static>> {
 }
 
 /// Wrap text to fit within given width.
+/// Uses unicode-width for accurate display width calculation.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
+    if width <= 2 {
+        // Width too small, just return original lines
         return text.lines().map(|s| s.to_string()).collect();
     }
 
     let mut result = Vec::new();
 
     for line in text.lines() {
+        // Process each original line
         if line.width() <= width {
             result.push(line.to_string());
         } else {
-            // Break into multiple lines
+            // Break into multiple lines using grapheme-based wrapping
             let mut current = String::new();
             let mut current_width = 0;
 
-            for word in line.split_whitespace() {
-                let word_width = word.width();
+            for g in unicode_segmentation::UnicodeSegmentation::graphemes(line, true) {
+                let g_width = g.width();
 
-                if current_width == 0 {
-                    current = word.to_string();
-                    current_width = word_width;
-                } else if current_width + 1 + word_width <= width {
-                    current.push(' ');
-                    current.push_str(word);
-                    current_width += 1 + word_width;
+                if current_width + g_width > width {
+                    // Current line full, push it
+                    if !current.is_empty() {
+                        result.push(current.clone());
+                    }
+                    current = g.to_string();
+                    current_width = g_width;
                 } else {
-                    result.push(current);
-                    current = word.to_string();
-                    current_width = word_width;
+                    current.push_str(g);
+                    current_width += g_width;
                 }
             }
 
@@ -468,6 +470,42 @@ mod tests {
         assert!(wrapped.len() > 1);
         for line in &wrapped {
             assert!(line.width() <= 20);
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_chinese() {
+        // Chinese characters each have width 2
+        let text = "这是一个很长的中文句子需要被换行处理";
+        let wrapped = wrap_text(text, 10);
+
+        assert!(wrapped.len() > 1);
+        for line in &wrapped {
+            // Each Chinese char is width 2, so 10-width line can hold 5 chars
+            assert!(line.width() <= 10);
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_long_word() {
+        // Long word should be broken at grapheme level
+        let text = "supercalifragilisticexpialidocious";
+        let wrapped = wrap_text(text, 10);
+
+        assert!(wrapped.len() > 1);
+        for line in &wrapped {
+            assert!(line.width() <= 10);
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_mixed() {
+        // Mixed Chinese and English
+        let text = "Hello世界This是一个test混合内容";
+        let wrapped = wrap_text(text, 15);
+
+        for line in &wrapped {
+            assert!(line.width() <= 15);
         }
     }
 

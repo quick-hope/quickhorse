@@ -7,6 +7,8 @@
 //!
 //! Reference: OpenClaude src/utils/errors.ts, src/services/api/errors.ts
 
+#![allow(dead_code)] // Future use: error display integration
+
 mod types;
 mod classify;
 mod api;

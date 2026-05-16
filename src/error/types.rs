@@ -1,5 +1,7 @@
 //! Error types - ErrorCode, ErrorCategory, QuickHorseError
 
+#![allow(dead_code)] // Future use: error types integration
+
 use crate::error::{classify_io_error, classify_json_error, classify_reqwest_error};
 use std::fmt;
 

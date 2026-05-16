@@ -9,6 +9,8 @@
 //! 3. Base64 encode the encrypted data
 //! 4. Store in file with restricted permissions (0o600)
 
+#![allow(dead_code)] // Future use: encrypted storage backend
+
 use super::{get_storage_dir, SecureStorage, SecureStorageData};
 use std::error::Error;
 use std::fs;

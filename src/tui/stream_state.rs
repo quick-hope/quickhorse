@@ -5,6 +5,8 @@
 //! - Two-gear pacing: Smooth (normal) vs CatchUp (backlog draining)
 //! - Thinking blocks bypass the newline gate for live display
 
+#![allow(dead_code)] // Future use: adaptive chunking integration
+
 use std::time::Instant;
 
 /// Chunking mode for adaptive pacing.

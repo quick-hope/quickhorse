@@ -2,6 +2,8 @@
 //!
 //! Provides user confirmation UI for permission requests.
 
+#![allow(dead_code)] // Future use: permission request fields
+
 use crate::permissions::{PermissionResult, PermissionUpdate, RuleBehavior, RuleSource, RuleValue};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},

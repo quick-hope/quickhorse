@@ -1,5 +1,7 @@
 //! BashTool - Execute shell commands
 
+#![allow(dead_code)] // Future use: bash permission fields
+
 use crate::permissions::{BashPermissionChecker, PermissionMode};
 use crate::tools::tool_trait::{build_schema, Tool, ToolContext, ToolResult, PermissionResult};
 use async_trait::async_trait;

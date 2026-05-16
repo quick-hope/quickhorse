@@ -1,5 +1,7 @@
 //! Log configuration
 
+#![allow(dead_code)] // Future use: log config options
+
 use std::path::PathBuf;
 
 /// Log configuration options

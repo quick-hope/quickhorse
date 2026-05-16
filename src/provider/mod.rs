@@ -1,5 +1,7 @@
 //! Provider module - LLM provider implementations
 
+#![allow(dead_code)] // Future use: provider capabilities
+
 mod anthropic;
 mod gemini;
 mod ollama;

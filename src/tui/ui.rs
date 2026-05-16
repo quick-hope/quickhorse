@@ -1,5 +1,7 @@
 //! UI rendering for TUI using new widget system
 
+#![allow(dead_code)] // Future use: message rendering helpers
+
 use crate::permissions::PermissionResult;
 use crate::provider::{ContentBlock, Message};
 use crate::tui::app::App;
@@ -155,7 +157,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     cache.ensure(&cell_lines, &revisions, area.width);
 
     // Get visible lines based on resolved scroll
-    let (final_scroll, top) = resolved_scroll.resolve_top(total_lines, visible_lines);
+    let (_final_scroll, top) = resolved_scroll.resolve_top(total_lines, visible_lines);
     let visible_content = cache.visible_lines(top, visible_lines);
 
     // Create chat widget from visible lines

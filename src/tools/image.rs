@@ -6,11 +6,10 @@
 //! - Base64 encoding for multimodal API support
 //! - Image description via vision-capable models
 
-use crate::permissions::{PermissionBehavior, PermissionMode};
 use crate::tools::{Tool, ToolContext, ToolResult, build_schema};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
-use image::{GenericImageView, ImageFormat};
+use image::ImageFormat;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::error::Error;

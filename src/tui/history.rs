@@ -5,6 +5,8 @@
 //! - History search functionality
 //! - History entry management
 
+#![allow(dead_code)] // Future use: Ctrl+R history search
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;

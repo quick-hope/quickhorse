@@ -3,6 +3,9 @@
 //! Widgets are pure render components that take pre-computed data
 //! and render to a buffer. They do not own App state.
 
+#![allow(dead_code)] // Widgets are for future integration
+#![allow(unused_imports)] // Future integration exports
+
 mod chat;
 mod header;
 mod footer;

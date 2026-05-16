@@ -4,7 +4,7 @@ mod setup;
 
 pub use setup::SetupWizard;
 use crate::permissions::{PermissionConfig, PermissionUpdate, RuleBehavior, RuleSource, RuleValue};
-use crate::secure_storage::{get_secure_storage, SecureStorageData};
+use crate::secure_storage::get_secure_storage;
 
 use serde::{Deserialize, Serialize};
 use std::env;

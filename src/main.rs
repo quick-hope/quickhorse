@@ -8,6 +8,9 @@
 //! - Slash commands
 //! - Permission control with whitelist/blacklist
 
+#![allow(unused_imports)] // Imports used for public API
+#![allow(dead_code)] // Dead code reserved for future integration
+
 mod agent;
 mod commands;
 mod config;

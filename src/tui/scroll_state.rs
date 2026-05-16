@@ -4,6 +4,8 @@
 //! into the rendered line buffer points at the top visible line, with
 //! `usize::MAX` reserved as a sentinel meaning "stuck to the live tail."
 
+#![allow(dead_code)] // Future use: full scroll integration
+
 /// Sentinel offset meaning "stuck to live tail" — the renderer translates
 /// this to `max_start` at draw time, so newly appended lines pull the view
 /// down with them.

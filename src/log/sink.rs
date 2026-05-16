@@ -2,6 +2,8 @@
 //!
 //! Reference: OpenClaude src/utils/log.ts ErrorLogSink
 
+#![allow(dead_code)] // Future use: log sink integration
+
 use std::path::PathBuf;
 use std::io::Write;
 use crate::log::types::DiagnosticLogEntry;

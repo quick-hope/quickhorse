@@ -3,6 +3,8 @@
 //! Provides utilities for logging diagnostic events without PII.
 //! Reference: OpenClaude src/utils/diagLogs.ts
 
+#![allow(dead_code)] // Future use: diagnostic logging integration
+
 use crate::log::types::{DiagnosticLogEntry, LogLevel};
 use std::time::Instant;
 
