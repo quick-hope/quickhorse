@@ -14,6 +14,7 @@
 | v0.4.4 | 📋 规划中 | TBD | UX改进 - 欢迎屏/高亮条/耗时彩蛋 (参考Claude Code设计) |
 | v0.5.0 | ✅ 已完成 | 2026-05-15 | TUI Widget 系统 + Scroll 修复 |
 | v0.5.1 | ✅ 已完成 | 2026-05-17 | Grapheme换行 + Warnings清理 |
+| v0.5.2 | 🔄 进行中 | TBD | Cost追踪 + Hooks + Compaction (参考DeepSeek-TUI) |
 | v0.6.0 | 📋 规划中 | TBD | 思考模式 + GitHub/Docker集成 |
 | v1.0.0 | 🎯 愿景 | TBD | 完整 CLI Agent |
 
